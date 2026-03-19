@@ -1,0 +1,154 @@
+{
+  "name": "01_nova",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "eb55d73e-7eb9-4c86-b7b6-13761d63acf4",
+      "name": "📥 Llamada Entrante",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// NOVA v1.0.0 — Orientadora y Gestora de Citas\n// Sistema NOVA · SAGE · ATLAS + WhatsApp\n// Erick Del Piero | Marzo 2026\n//\n// RESPONSABILIDADES:\n//  - Primer punto de contacto con el paciente\n//  - Detección de intención y routing a SAGE o ATLAS\n//  - Recopilación básica de datos para agendamiento\n//  - Manejo de saludos y consultas generales\n//\n// NOTA: Cuando Claude API esté integrado, reemplazar la lógica\n// de respuestas hardcodeadas por una llamada HTTP a la API de Claude\n// con el system prompt de NOVA (ver /prompts/nova_system_prompt.md)\n// ============================================================\n\nconst inp = $input.first().json;\n\n// ── VALIDACIÓN ─────────────────────────────────────────────\nconst REQUIRED = ['userId', 'sessionId', 'remoteJid', 'instance'];\nconst missing  = REQUIRED.filter(k => !inp[k]);\nif (missing.length) {\n  return [{ json: { success: false, error: 'MISSING_FIELDS', details: missing } }];\n}\n\n// ── SETUP ──────────────────────────────────────────────────\nconst ctx   = inp.sessionContext || {};\nconst nova  = ctx.nova || {};\nconst state = nova.state || 'welcome';\nconst txt   = (inp.messageText || '').toLowerCase().trim();\nconst intent = inp.intentDetected || '';\nconst ph    = inp.pendingHandoff || null;  // pendingHandoff\nconst fn    = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm    = fn ? ` ${fn}` : '';\nconst isNew = inp.isNewSession || ['initial', 'initial_presented'].includes(inp.sessionState);\n\n// Mutable copies para actualizar el estado de NOVA\nconst novaMut = { ...nova };\nlet rt  = '';        // responseText\nlet nag = 'NOVA';   // newActiveAgent\nlet nss = 'active'; // newSessionState\n\n// ============================================================\n// MOTOR PRINCIPAL — Prioridades de respuesta\n// Orden deliberado: handoffs > estados de recopilación >\n// intenciones explícitas > saludo > primer contacto > fallback\n// ============================================================\n\n// ── PRIORIDAD 1: HANDOFFS DETECTADOS POR EL ROUTER ─────────\n// El router ya detectó intención clara, NOVA solo entrega.\nif (ph === 'SAGE') {\n  const pre = isNew ? `¡Hola${nm}! 👋 Bienvenido/a a *Pangi*.\n\n` : `Perfecto${nm}. `;\n  rt  = `${pre}Te conecto con *SAGE* 🩺, nuestra especialista en cotizaciones médicas.\\n\\nYa le compartí tu mensaje — no necesitas repetir nada.\\n\\n¿Sobre qué procedimiento deseas cotizar?`;\n  nag = 'SAGE';\n  nss = 'handoff_received';\n  novaMut.state = 'handoff_complete';\n\n} else if (ph === 'ATLAS') {\n  const pre = isNew ? `¡Hola${nm}! 👋 Bienvenido/a a *Pangi*.\\n\\n` : `Claro${nm}. `;\n  rt  = `${pre}Te presento a *ATLAS* 🗺️, nuestro consejero de turismo médico.\\n\\nAnalizará tus opciones y calculará el costo real del viaje médico incluyendo vuelo, alojamiento y recuperación. ¿Listo/a para explorar?`;\n  nag = 'ATLAS';\n  nss = 'handoff_received';\n  novaMut.state = 'handoff_complete';\n\n// ── PRIORIDAD 2: RECOPILACIÓN DE DATOS — AGENDAMIENTO ──────\n// NOVA está en proceso de recopilar datos para una cita.\n} else if (state === 'gathering_appointment_city') {\n  novaMut.appointment_city = inp.messageText;\n  rt  = `Perfecto, *${inp.messageText}* 📍\\n\\n¿Qué *especialidad médica* necesitas?\\n\\nPor ejemplo: dental, cardiología, traumatología, oftalmología, dermatología...`;\n  novaMut.state = 'gathering_appointment_specialty';\n  nss = 'gathering_appointment_specialty';\n\n} else if (state === 'gathering_appointment_specialty') {\n  novaMut.appointment_specialty = inp.messageText;\n  const city      = novaMut.appointment_city || 'la ciudad indicada';\n  const specialty = inp.messageText;\n  rt  = `Entendido${nm} 📋\\n\\n*Tu búsqueda registrada:*\\n📍 Ciudad: ${city}\\n🏥 Especialidad: ${specialty}\\n\\n⏳ La búsqueda de médicos disponibles y agendamiento en línea estarán disponibles próximamente en Pangi. Tu solicitud quedó registrada.\\n\\n¿En qué más puedo ayudarte?`;\n  novaMut.state = 'active';\n  nss = 'active';\n\n// ── PRIORIDAD 3: INTENCIONES EXPLÍCITAS DEL ROUTER ─────────\n} else if (intent.includes('agendar')) {\n  rt  = `Entendido${nm}. Para encontrar médicos disponibles y agendar tu cita, necesito dos datos:\\n\\n*1️⃣ ¿En qué ciudad necesitas la cita?*\\n\\nEscríbela y seguimos.`;\n  novaMut.state = 'gathering_appointment_city';\n  nss = 'gathering_appointment_info';\n\n// ── PRIORIDAD 4: PRIMER CONTACTO — SESIÓN NUEVA ────────────\n} else if (isNew) {\n  rt  = `¡Hola${nm}! 👋 Soy *NOVA*, tu asistente de *Pangi*.\\n\\nEstoy aquí para ayudarte a navegar los servicios de salud internacional. ¿Qué necesitas hoy?\\n\\n💰 Escribe *cotizar* — Recibe precios precisos de médicos\\n🗺️ Escribe *comparar* — Analiza el costo total de tu viaje médico\\n🗓️ Escribe *agendar* — Busca médicos y reserva citas\\n\\n¿Con cuál puedo ayudarte?`;\n  novaMut.state = 'initial_presented';\n  nss = 'initial_presented';\n\n// ── PRIORIDAD 5: SALUDO EN SESIÓN ACTIVA ───────────────────\n} else if (intent === 'saludo') {\n  rt  = `¡Hola de nuevo${nm}! 👋 ¿En qué puedo ayudarte hoy?\\n\\n💰 *Cotizar* un procedimiento médico\\n🗺️ *Comparar* destinos de turismo médico\\n🗓️ *Agendar* una cita`;\n  novaMut.state = 'active';\n  nss = 'active';\n\n// ── FALLBACK — INTENCIÓN NO RECONOCIDA ─────────────────────\n} else {\n  rt  = `Entiendo${nm}. Puedo orientarte en estas áreas:\\n\\n💰 *Cotizar* — Precios precisos de médicos para tu procedimiento\\n🗺️ *Comparar destinos* — Costo total real de tu viaje médico\\n🗓️ *Agendar* — Encuentra médicos disponibles en tu ciudad\\n\\n¿Cuál te interesa?`;\n  novaMut.state = 'clarification_needed';\n  nss = 'clarification_needed';\n}\n\n// ── CONSTRUIR RESPUESTA FINAL ──────────────────────────────\nreturn [{ json: {\n  success:           true,\n  responseText:      rt,\n  newActiveAgent:    nag,\n  newSessionState:   nss,\n  newSessionContext: { ...ctx, nova: novaMut },\n  userId:            parseInt(inp.userId),\n  sessionId:         parseInt(inp.sessionId),\n  userLanguage:      inp.userLanguage || 'es',\n  userName:          inp.userName     || null,\n  remoteJid:         inp.remoteJid,\n  instance:          inp.instance\n}}];"
+      },
+      "id": "fa5e026c-3671-4d10-9eba-cc0f247eba6e",
+      "name": "🌟 NOVA — Validar + Motor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "nova-cond-1",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9d7e3ed3-9a9e-4c9e-b71f-3c35bd79ea59",
+      "name": "✅ ¿Procesado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass-through: el Motor ya construyó la respuesta completa.\n// Este nodo existe para claridad visual en el canvas.\nreturn [$input.first()];"
+      },
+      "id": "6d006011-e3e3-4542-93df-68bf4c1da332",
+      "name": "📤 Respuesta NOVA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nreturn [{ json: {\n  success:        false,\n  error:          e.error   || 'NOVA_ENGINE_ERROR',\n  details:        e.details || [],\n  responseText:   'Lo siento, tuve un problema técnico. Por favor escribe de nuevo en unos momentos.',\n  newActiveAgent: 'NOVA',\n  _meta: { timestamp: new Date().toISOString(), source: 'nova_error' }\n}}];"
+      },
+      "id": "f96338b0-dc22-4fb1-bdca-393709674bd6",
+      "name": "❌ Error NOVA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "path": "2978c42c-72a2-4e2a-8ad0-5e607595869b",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        -32
+      ],
+      "id": "923871ae-6ebb-447b-b82f-d61c62f2290e",
+      "name": "Webhook",
+      "webhookId": "2978c42c-72a2-4e2a-8ad0-5e607595869b"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "📥 Llamada Entrante": {
+      "main": [
+        [
+          {
+            "node": "🌟 NOVA — Validar + Motor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌟 NOVA — Validar + Motor": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Procesado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Procesado?": {
+      "main": [
+        [
+          {
+            "node": "📤 Respuesta NOVA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Error NOVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d0ccf291-c9cd-422f-b159-13a92e99736e",
+  "meta": {
+    "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
+  },
+  "id": "5W0fdt84Y1QaRLLy",
+  "tags": []
+}

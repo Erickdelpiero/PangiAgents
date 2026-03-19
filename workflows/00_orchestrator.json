@@ -1,0 +1,963 @@
+{
+  "name": "00_orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pangi-whatsapp-dev",
+        "options": {}
+      },
+      "id": "96d200bb-e313-4ffe-ae88-10e50c5e64f0",
+      "name": "🌐 Webhook — Evolution API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -3600,
+        240
+      ],
+      "webhookId": "70e718c1-ffd3-4777-ba7a-7132acb14d21"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PANGI ORCHESTRATOR — Message Extractor v1.0.0\n// Compatible con Evolution API V2 webhook payload.\n// ============================================================\n\nconst body = $input.first().json.body || $input.first().json;\nconst event = body.event;\nconst instance = body.instance || 'Test1';\nconst data = body.data;\n\n// Solo procesamos mensajes reales\nif (event !== 'messages.upsert') {\n  return [{ json: { valid: false, reason: 'not_message_event', event } }];\n}\nif (!data) {\n  return [{ json: { valid: false, reason: 'no_data_field' } }];\n}\n\nconst key          = data.key || {};\n// Evolution API V2 puede enviar remoteJid en formato @lid (nuevo formato WhatsApp).\n// remoteJidAlt contiene el JID tradicional @s.whatsapp.net que Evolution puede usar.\n// Priorizamos el formato tradicional para compatibilidad con sendText.\nconst remoteJid = key.remoteJidAlt || key.remoteJid || '';\nconst fromMe       = key.fromMe   || false;\nconst messageId    = key.id       || '';\nconst pushName     = data.pushName || null;\nconst timestamp    = data.messageTimestamp || Math.floor(Date.now() / 1000);\n\n// ── FILTROS ───────────────────────────────────────────────\n// Ignorar mensajes propios (enviados por el bot)\nif (fromMe)  return [{ json: { valid: false, reason: 'from_me', remoteJid } }];\n// Ignorar grupos\nif (remoteJid.endsWith('@g.us')) return [{ json: { valid: false, reason: 'group_message' } }];\n// Ignorar estados de WhatsApp\nif (remoteJid === 'status@broadcast') return [{ json: { valid: false, reason: 'status_broadcast' } }];\n// Ignorar mensajes vacíos de notificación\nif (!remoteJid) return [{ json: { valid: false, reason: 'no_remote_jid' } }];\n\n// ── LIMPIAR NÚMERO DE TELÉFONO ─────────────────────────────\nconst phone = '+' + remoteJid\n  .replace('@s.whatsapp.net','')\n  .replace('@c.us','')\n  .replace('@lid','')\n  .replace(/@[^@]+$/,''); // catch-all para cualquier sufijo futuro\n\n// ── EXTRAER CONTENIDO DEL MENSAJE ─────────────────────────\nconst msg = data.message || {};\nlet messageText = '';\nlet messageType = 'unknown';\n\nif (msg.conversation) {\n  messageText = msg.conversation;\n  messageType = 'text';\n} else if (msg.extendedTextMessage?.text) {\n  messageText = msg.extendedTextMessage.text;\n  messageType = 'text';\n} else if (msg.buttonsResponseMessage?.selectedButtonId) {\n  // Respuesta de botón clásico\n  messageText = msg.buttonsResponseMessage.selectedButtonId;\n  messageType = 'button_reply';\n} else if (msg.listResponseMessage?.singleSelectReply?.selectedRowId) {\n  // Respuesta de lista\n  messageText = msg.listResponseMessage.singleSelectReply.selectedRowId;\n  messageType = 'button_reply';\n} else if (msg.interactiveResponseMessage?.nativeFlowResponseMessage) {\n  // Respuesta interactiva (botones nativos WhatsApp)\n  try {\n    const params = JSON.parse(msg.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson || '{}');\n    messageText = params.id || params.title || '';\n    messageType = 'button_reply';\n  } catch(e) { messageText = ''; messageType = 'button_reply'; }\n} else if (msg.imageMessage) {\n  messageText = msg.imageMessage.caption || '[Imagen recibida]';\n  messageType = 'image';\n} else if (msg.audioMessage || msg.pttMessage) {\n  messageText = '[Audio recibido — función de voz próximamente]';\n  messageType = 'audio';\n} else if (msg.documentMessage) {\n  messageText = `[Documento recibido: ${msg.documentMessage.fileName || 'archivo'}]`;\n  messageType = 'document';\n} else if (msg.stickerMessage) {\n  messageText = '[Sticker]';\n  messageType = 'sticker';\n}\n\n// Sin contenido reconocible\nif (!messageText) {\n  return [{ json: { valid: false, reason: 'unsupported_or_empty_message', remoteJid, msgKeys: Object.keys(msg) } }];\n}\n\nreturn [{ json: {\n  valid: true,\n  phone,\n  remoteJid,\n  pushName,\n  messageText,\n  messageType,\n  messageId,\n  instance,\n  timestamp: new Date(timestamp * 1000).toISOString()\n}}];"
+      },
+      "id": "8c8695f1-2e64-40e8-aeb1-c8b29d01ef77",
+      "name": "🔎 Extraer y Validar Mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3360,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-valid-msg",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "98c8eeb0-399d-470a-8ee4-595e01907a03",
+      "name": "✅ ¿Mensaje Procesable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3120,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $('🔎 Extraer y Validar Mensaje').first().json;\nreturn [{ json: {\n  operation: 'getOrCreateUser',\n  params: {\n    phone:    msg.phone,\n    name:     msg.pushName || null,\n    language: 'es'\n  }\n}}];"
+      },
+      "id": "ed4974f4-8448-4ee1-8903-2481f0eede27",
+      "name": "📦 Payload — getOrCreateUser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2880,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "fa902078-ecb8-4e82-8cf6-025fd935dfdf",
+      "name": "🗄️ DB — Usuario",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        -2640,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const userId = $('🗄️ DB — Usuario').first().json.data[0].id;\nreturn [{ json: {\n  operation: 'getActiveSession',\n  params: { userId }\n}}];"
+      },
+      "id": "71e6e65c-7962-4ee9-85a7-aac314dc58d7",
+      "name": "📦 Payload — getActiveSession",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2400,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "7fb0464c-579a-484c-aba2-b8f2d69df151",
+      "name": "🗄️ DB — Sesión Activa",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        -2160,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-session-exists",
+              "leftValue": "={{ $json.count }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt",
+                "rightValue": 0
+              },
+              "rightValue": 0
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "25073466-667f-4601-8313-f3e371effdd3",
+      "name": "✅ ¿Sesión Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1920,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// TRUE path: sesión activa encontrada en DB\nconst session  = $('🗄️ DB — Sesión Activa').first().json.data[0];\nconst userData = $('🗄️ DB — Usuario').first().json.data[0];\nconst msgData  = $('🔎 Extraer y Validar Mensaje').first().json;\n\nreturn [{ json: {\n  userId:         userData.id,\n  userName:       userData.name || msgData.pushName || null,\n  userLanguage:   userData.language || 'es',\n  userPhone:      userData.phone,\n  sessionId:      session.id,\n  activeAgent:    session.active_agent,\n  sessionState:   session.state,\n  sessionContext: typeof session.context === 'string' ? JSON.parse(session.context || '{}') : (session.context || {}),\n  isNewSession:   false,\n  messageText:    msgData.messageText,\n  messageType:    msgData.messageType,\n  remoteJid:      msgData.remoteJid,\n  instance:       msgData.instance\n}}];"
+      },
+      "id": "9cac3752-d098-4fa0-8768-bb44e574256c",
+      "name": "🔧 Normalizar — Sesión Existente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1680,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// FALSE path: no hay sesión, la creamos con NOVA como agente inicial\nconst userId = $('🗄️ DB — Usuario').first().json.data[0].id;\nreturn [{ json: {\n  operation: 'createSession',\n  params: { userId, agent: 'NOVA', state: 'initial', context: {} }\n}}];"
+      },
+      "id": "ea4cff8e-0737-4707-a649-38da5f69a867",
+      "name": "📦 Payload — createSession",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1680,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "d49bc32f-4d56-4485-beb5-d0d24f162754",
+      "name": "🗄️ DB — Crear Sesión",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// FALSE path: sesión recién creada\nconst session  = $('🗄️ DB — Crear Sesión').first().json.data[0];\nconst userData = $('🗄️ DB — Usuario').first().json.data[0];\nconst msgData  = $('🔎 Extraer y Validar Mensaje').first().json;\n\nreturn [{ json: {\n  userId:         userData.id,\n  userName:       userData.name || msgData.pushName || null,\n  userLanguage:   userData.language || 'es',\n  userPhone:      userData.phone,\n  sessionId:      session.id,\n  activeAgent:    session.active_agent,\n  sessionState:   session.state,\n  sessionContext: {},\n  isNewSession:   true,\n  messageText:    msgData.messageText,\n  messageType:    msgData.messageType,\n  remoteJid:      msgData.remoteJid,\n  instance:       msgData.instance\n}}];"
+      },
+      "id": "fb36b55f-7aef-433a-b2a3-39a1741f4b1c",
+      "name": "🔧 Normalizar — Sesión Nueva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Este nodo recibe data de CUALQUIERA de los dos Normalizar nodes.\n// $json contiene el contexto unificado de la sesión.\nconst s = $json;\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      s.userId,\n    sessionId:   s.sessionId,\n    agent:       s.activeAgent,\n    role:        'user',\n    message:     s.messageText,\n    messageType: s.messageType\n  },\n  // Transportar contexto de sesión para nodos posteriores\n  _session: {\n    userId:         s.userId,\n    userName:       s.userName,\n    userLanguage:   s.userLanguage,\n    userPhone:      s.userPhone,\n    sessionId:      s.sessionId,\n    activeAgent:    s.activeAgent,\n    sessionState:   s.sessionState,\n    sessionContext: s.sessionContext,\n    isNewSession:   s.isNewSession,\n    messageText:    s.messageText,\n    messageType:    s.messageType,\n    remoteJid:      s.remoteJid,\n    instance:       s.instance\n  }\n}}];"
+      },
+      "id": "ba1691f1-ef5c-4f0a-8f92-463af760163d",
+      "name": "📦 Payload — Guardar Mensaje Entrante",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "6bc3e12a-6122-425f-a0de-708316de1d59",
+      "name": "🗄️ DB — Guardar Mensaje Entrante",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// INTENT ROUTER v1.0.0\n// Determina qué agente debe manejar este mensaje.\n// Lógica: sesión activa primero, luego detección por keywords.\n// Cuando se integre Claude API, reemplazar keyword detection\n// con llamada a Claude para detección de intención más precisa.\n// ============================================================\n\n// Recuperar contexto de la sesión (guardado en el payload anterior)\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── REGLA 1: Respetar agente activo en sesiones en curso ─────\n// Si el usuario ya está con SAGE o ATLAS, no interrumpir.\n// Solo NOVA puede redirigir a otros agentes.\nif (activeAgent === 'SAGE'  && !isNew) return [{ json: { ...session, targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null } }];\nif (activeAgent === 'ATLAS' && !isNew) return [{ json: { ...session, targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null } }];\n\n// ── REGLA 2: Botones interactivos ─────────────────────────────\n// Detectar respuestas a botones/listas de mensajes previos.\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt === 'cotizar') return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  } }];\n  if (txt.includes('comparar') || txt === 'comparar') return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' } }];\n  if (txt.includes('agendar')  || txt === 'agendar')  return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   } }];\n  // Botón no reconocido → NOVA maneja\n  return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null } }];\n}\n\n// ── REGLA 3: Keywords de texto ─────────────────────────────────\n// Listas de palabras clave por intención\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador',\n  'blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento',\n  'bichectomia','blefaroplastia','bbл','bbl','lifting','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela'\n];\nconst KW_COMPARAR = [\n  'compar','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena',\n  'perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami',\n  'costo total','costo del viaje','cuánto me sale','hospedaje'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','appointment',\n  'disponibilidad','horario','me atiendan','quiero ver','consulta'\n];\nconst KW_SALUDO = [\n  'hola','hi','hey','buenos días','buenas tardes','buenas noches',\n  'buenas','hello','ola','start','inicio','empezar','comenzar','iniciar'\n];\n\nconst hasCotizar  = KW_COTIZAR.some(kw  => txt.includes(kw));\nconst hasComparar = KW_COMPARAR.some(kw => txt.includes(kw));\nconst hasAgendar  = KW_AGENDAR.some(kw  => txt.includes(kw));\nconst hasSaludo   = KW_SALUDO.some(kw   => txt.includes(kw));\n\n// Cotizar tiene prioridad sobre comparar\nif (hasCotizar)  return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'cotizar_keyword',  pendingHandoff: 'SAGE'  } }];\nif (hasComparar) return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'comparar_keyword', pendingHandoff: 'ATLAS' } }];\nif (hasAgendar)  return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'agendar_keyword',  pendingHandoff: null   } }];\nif (hasSaludo)   return [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'saludo',           pendingHandoff: null   } }];\n\n// Sin intención clara → NOVA orienta\nreturn [{ json: { ...session, targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null } }];"
+      },
+      "id": "09ab9ca8-2185-44f2-85ff-cb71d4e774bd",
+      "name": "🧠 Router de Intención y Agente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.targetAgent }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "NOVA",
+                    "id": "0f3577c1-bcdb-4089-83a9-a35ec095133b"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.targetAgent }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "SAGE",
+                    "id": "f070602b-93d8-49c7-9ef7-56fe1ced7e59"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.targetAgent }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "ATLAS",
+                    "id": "37c818e0-9964-4759-aa45-b4dc99b23343"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1bb0bcc5-387b-4fef-86af-9a7d4f504bee",
+      "name": "🔀 Switch — Agente Activo",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PREPARAR ENVÍO WHATSAPP v1.0.1\n// Recibe output de NOVA, SAGE o ATLAS.\n// Prepara payload para Evolution API V2.\n// Fix: validación de sessionId + número siempre presente.\n// ============================================================\n\nconst a = $json;\n\n// Safeguard sessionId — NaN y undefined se convierten a null\n// para que updateSession falle explícitamente en vez de silenciosamente.\nconst rawSessionId  = a.sessionId;\nconst safeSessionId = (rawSessionId !== null && rawSessionId !== undefined &&\n                       Number.isInteger(Number(rawSessionId)) &&\n                       Number(rawSessionId) > 0)\n  ? Number(rawSessionId)\n  : null;\n\nif (!safeSessionId) {\n  console.error(`[PANGI] ⚠️ sessionId inválido del agente: \"${rawSessionId}\". Agent: ${a.newActiveAgent}`);\n}\n\n// Safeguard remoteJid — sin esto Evolution API devuelve 400 Bad Request\nconst remoteJid = a.remoteJid || null;\nif (!remoteJid) {\n  console.error(`[PANGI] ⚠️ remoteJid ausente en output del agente: ${a.newActiveAgent}`);\n}\n\nconst instanceName = a.instance || 'Test1';\n\nreturn [{ json: {\n  evolutionUrl:  `https://evolution.coopelmilagro.com/message/sendText/${instanceName}`,\n  evolutionBody: JSON.stringify({\n    number: remoteJid,\n    text:   a.responseText || 'Error interno. Por favor escribe de nuevo.',\n    delay:  1000\n  }),\n  _responseText:        a.responseText || '',\n  _remoteJid:           remoteJid,\n  _instance:            instanceName,\n  _userId:              a.userId,\n  _sessionId:           safeSessionId,\n  _newActiveAgent:      a.newActiveAgent  || 'NOVA',\n  _newSessionState:     a.newSessionState || 'active',\n  _newSessionContext:   a.newSessionContext || {}\n}}];"
+      },
+      "id": "d9780d87-d64d-45d7-baaa-8e9bd2308c58",
+      "name": "📤 Preparar Envío WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.evolutionUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.evolutionBody }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "84c5e27c-453a-4341-871f-7e0f5862e3d3",
+      "name": "📱 Evolution API — Enviar Respuesta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        480,
+        192
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MpowGjAly95z7s3y",
+          "name": "Evolution API - Pangi"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recuperar contexto del nodo de preparación (anterior al HTTP)\nconst prep = $('📤 Preparar Envío WhatsApp').first().json;\n\nreturn [{ json: {\n  operation: 'updateSession',\n  params: {\n    sessionId: prep._sessionId,\n    agent:     prep._newActiveAgent,\n    state:     prep._newSessionState,\n    context:   prep._newSessionContext\n  },\n  // Transportar para guardar mensaje saliente\n  _prep: prep\n}}];"
+      },
+      "id": "8f2d4f42-228e-4106-adc4-53f54d12d421",
+      "name": "📦 Payload — Update Session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "fa822f3e-793c-45e5-bcca-632e0d82b17a",
+      "name": "🗄️ DB — Update Session",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        960,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('📦 Payload — Update Session').first().json._prep;\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      prep._userId,\n    sessionId:   prep._sessionId,\n    agent:       prep._newActiveAgent,\n    role:        'assistant',\n    message:     prep._responseText,\n    messageType: 'text'\n  }\n}}];"
+      },
+      "id": "4acbf943-e9ea-4652-92bc-ab2d91ec0b89",
+      "name": "📦 Payload — Guardar Mensaje Saliente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "4ace56e4-9e98-43da-bd4f-f14968dabbf2",
+      "name": "🗄️ DB — Guardar Mensaje Saliente",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mensajes filtrados silenciosamente.\n// Esto es intencional: no queremos responder a bots,\n// grupos, estados, ni mensajes propios.\nconst reason = $json.reason || 'unknown';\nconsole.log(`[PANGI] Mensaje ignorado. Razón: ${reason}`);\nreturn [{ json: { ignored: true, reason } }];"
+      },
+      "id": "809db4f6-b260-4f2a-9848-0efb2a034bbd",
+      "name": "🚫 Ignorar — No Procesable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NzPXTOZvxh10vc71",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NzPXTOZvxh10vc71",
+          "cachedResultName": "02_sage"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        192
+      ],
+      "id": "8fbe3068-6b00-41dd-a4f4-014f90c2e372",
+      "name": "Call '02_sage'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "5W0fdt84Y1QaRLLy",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/5W0fdt84Y1QaRLLy",
+          "cachedResultName": "01_nova"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "faa52192-0414-45f0-be4f-d036b4bcc3f4",
+      "name": "Call '01_nova'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ItgP3qsoKkZt8TcJ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/ItgP3qsoKkZt8TcJ",
+          "cachedResultName": "03_atlas"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        368
+      ],
+      "id": "0699ef88-c8a1-489a-8055-533b8f53b81b",
+      "name": "Call '03_atlas'"
+    }
+  ],
+  "pinData": {
+    "🌐 Webhook — Evolution API": [
+      {
+        "json": {
+          "headers": {
+            "connection": "upgrade",
+            "host": "n8n.coopelmilagro.com",
+            "x-real-ip": "157.173.96.16",
+            "x-forwarded-for": "157.173.96.16",
+            "x-forwarded-proto": "https",
+            "content-length": "1713",
+            "accept": "application/json, text/plain, */*",
+            "content-type": "application/json",
+            "user-agent": "axios/1.12.2",
+            "accept-encoding": "gzip, compress, deflate, br"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "event": "messages.upsert",
+            "instance": "Test1",
+            "data": {
+              "key": {
+                "remoteJid": "166821009338534@lid",
+                "remoteJidAlt": "51941915097@s.whatsapp.net",
+                "fromMe": false,
+                "id": "3EB068689B0226C3391A68",
+                "participant": "",
+                "addressingMode": "lid"
+              },
+              "pushName": "Erick Del Piero",
+              "status": "DELIVERY_ACK",
+              "message": {
+                "messageContextInfo": {
+                  "deviceListMetadata": {
+                    "senderKeyIndexes": [],
+                    "recipientKeyIndexes": [],
+                    "senderKeyHash": {
+                      "0": 245,
+                      "1": 206,
+                      "2": 8,
+                      "3": 54,
+                      "4": 206,
+                      "5": 165,
+                      "6": 15,
+                      "7": 44,
+                      "8": 204,
+                      "9": 152
+                    },
+                    "senderTimestamp": {
+                      "low": 1772896390,
+                      "high": 0,
+                      "unsigned": true
+                    },
+                    "senderAccountType": 0,
+                    "receiverAccountType": 0,
+                    "recipientKeyHash": {
+                      "0": 128,
+                      "1": 75,
+                      "2": 193,
+                      "3": 202,
+                      "4": 159,
+                      "5": 255,
+                      "6": 86,
+                      "7": 65,
+                      "8": 190,
+                      "9": 169
+                    },
+                    "recipientTimestamp": {
+                      "low": 1772237358,
+                      "high": 0,
+                      "unsigned": true
+                    }
+                  },
+                  "deviceListMetadataVersion": 2,
+                  "messageSecret": {
+                    "0": 133,
+                    "1": 253,
+                    "2": 146,
+                    "3": 100,
+                    "4": 253,
+                    "5": 161,
+                    "6": 148,
+                    "7": 217,
+                    "8": 205,
+                    "9": 146,
+                    "10": 76,
+                    "11": 140,
+                    "12": 185,
+                    "13": 223,
+                    "14": 147,
+                    "15": 144,
+                    "16": 113,
+                    "17": 198,
+                    "18": 2,
+                    "19": 221,
+                    "20": 98,
+                    "21": 18,
+                    "22": 221,
+                    "23": 191,
+                    "24": 55,
+                    "25": 178,
+                    "26": 143,
+                    "27": 132,
+                    "28": 177,
+                    "29": 215,
+                    "30": 45,
+                    "31": 170
+                  },
+                  "limitSharingV2": {
+                    "trigger": 0,
+                    "initiatedByMe": false
+                  }
+                },
+                "conversation": "dental"
+              },
+              "contextInfo": {
+                "mentionedJid": [],
+                "groupMentions": [],
+                "ephemeralSettingTimestamp": {
+                  "low": 1773444304,
+                  "high": 0,
+                  "unsigned": false
+                },
+                "disappearingMode": {
+                  "initiator": 0,
+                  "trigger": 1,
+                  "initiatedByMe": false
+                }
+              },
+              "messageType": "conversation",
+              "messageTimestamp": 1773692542,
+              "instanceId": "ab9cec16-fcbe-40af-a91a-56eb998bac03",
+              "source": "web"
+            },
+            "destination": "https://n8n.coopelmilagro.com/webhook/pangi-whatsapp-dev",
+            "date_time": "2026-03-16T15:22:22.645Z",
+            "sender": "51955298245@s.whatsapp.net",
+            "server_url": "https://evolution.coopelmilagro.com",
+            "apikey": "[REVOKED_EVOLUTION_API_KEY]"
+          },
+          "webhookUrl": "https://n8n.coopelmilagro.com/webhook/pangi-whatsapp-dev",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "🌐 Webhook — Evolution API": {
+      "main": [
+        [
+          {
+            "node": "🔎 Extraer y Validar Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Extraer y Validar Mensaje": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Mensaje Procesable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Mensaje Procesable?": {
+      "main": [
+        [
+          {
+            "node": "📦 Payload — getOrCreateUser",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🚫 Ignorar — No Procesable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Payload — getOrCreateUser": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Usuario": {
+      "main": [
+        [
+          {
+            "node": "📦 Payload — getActiveSession",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Payload — getActiveSession": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Sesión Activa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Sesión Activa": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Sesión Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Sesión Existe?": {
+      "main": [
+        [
+          {
+            "node": "🔧 Normalizar — Sesión Existente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📦 Payload — createSession",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Normalizar — Sesión Existente": {
+      "main": [
+        [
+          {
+            "node": "📦 Payload — Guardar Mensaje Entrante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Payload — createSession": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Crear Sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Crear Sesión": {
+      "main": [
+        [
+          {
+            "node": "🔧 Normalizar — Sesión Nueva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Normalizar — Sesión Nueva": {
+      "main": [
+        [
+          {
+            "node": "📦 Payload — Guardar Mensaje Entrante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Payload — Guardar Mensaje Entrante": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Guardar Mensaje Entrante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Guardar Mensaje Entrante": {
+      "main": [
+        [
+          {
+            "node": "🧠 Router de Intención y Agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Router de Intención y Agente": {
+      "main": [
+        [
+          {
+            "node": "🔀 Switch — Agente Activo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Switch — Agente Activo": {
+      "main": [
+        [
+          {
+            "node": "Call '01_nova'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call '02_sage'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call '03_atlas'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 Preparar Envío WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "📱 Evolution API — Enviar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📱 Evolution API — Enviar Respuesta": {
+      "main": [
+        [
+          {
+            "node": "📦 Payload — Update Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Payload — Update Session": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Update Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Update Session": {
+      "main": [
+        [
+          {
+            "node": "📦 Payload — Guardar Mensaje Saliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Payload — Guardar Mensaje Saliente": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Guardar Mensaje Saliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '02_sage'": {
+      "main": [
+        [
+          {
+            "node": "📤 Preparar Envío WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '01_nova'": {
+      "main": [
+        [
+          {
+            "node": "📤 Preparar Envío WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '03_atlas'": {
+      "main": [
+        [
+          {
+            "node": "📤 Preparar Envío WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f8abfcb0-6d9e-4bf9-bc7d-564330c64275",
+  "meta": {
+    "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
+  },
+  "id": "LecOpOG9BFscigzN",
+  "tags": []
+}

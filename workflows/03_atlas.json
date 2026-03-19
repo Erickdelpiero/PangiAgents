@@ -1,0 +1,276 @@
+{
+  "name": "03_atlas",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d46b86da-18ad-441d-b039-baff6bafa1a1",
+      "name": "📥 Llamada Entrante",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $input.first().json;\nconst REQUIRED = ['userId','sessionId','remoteJid','instance'];\nconst missing  = REQUIRED.filter(k => !inp[k]);\nif (missing.length) {\n  return [{ json: { success: false, error: 'MISSING_FIELDS', details: missing } }];\n}\nreturn [{ json: { success: true, ...inp } }];"
+      },
+      "id": "4be4bcb2-c981-450b-a6e0-443476360e86",
+      "name": "🔍 Validar Input ATLAS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "atlas-cond-1",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ad4eb887-cb46-4c64-b20f-32a3bd305c9e",
+      "name": "✅ ¿Input Válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Siempre cargamos todos los destinos activos.\n// Son 10 filas estáticas — costo de query mínimo.\nreturn [{ json: { operation: 'getDestinations', params: {} } }];"
+      },
+      "id": "69577406-df7c-481f-b594-aa397b9f7779",
+      "name": "📦 Preparar — getDestinations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "f748aab8-f321-45fe-9863-2cadf3507c03",
+      "name": "🗄️ DB — Cargar Destinos",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cargar cotizaciones existentes del usuario si hay alguna.\n// Las cotizaciones pueden venir de SAGE o ser ingresadas manualmente en ATLAS.\nconst inp = $('🔍 Validar Input ATLAS').first().json;\nreturn [{ json: { operation: 'getQuotes', params: { userId: inp.userId } } }];"
+      },
+      "id": "933cfcd1-8d1a-40ee-be79-2c4263f63256",
+      "name": "📦 Preparar — getQuotes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "049fc7cb-8610-40eb-9268-3274a6fbd0dd",
+      "name": "🗄️ DB — Cargar Cotizaciones",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// ATLAS v1.0.0 — Consejero de Turismo Médico\n// Sistema NOVA · SAGE · ATLAS + WhatsApp\n// Erick Del Piero | Marzo 2026\n//\n// MOTOR DE ESTADO:\n//   welcome / handoff_received  → Bienvenida + ¿tiene cotizaciones?\n//   has_quotes_check            → Routing: tiene/no tiene cotizaciones\n//   exploring                   → Modo exploración: panorama de destinos\n//   entering_quotes             → Usuario ingresa cotizaciones manualmente\n//   analyzing                   → Cálculo de costo total por destino\n//   comparison_done             → Análisis mostrado, ofrecer checklist\n//   checklist_shown             → Checklist pre-viaje entregado\n//\n// CÁLCULO DE COSTO TOTAL:\n//   Total = procedimiento + vuelo estimado + (hotel/noche × días recuperación)\n//\n// DISEÑO PARA CLAUDE UPGRADE:\n// El parsing de cotizaciones del mensaje (precio + destino) será\n// reemplazado por Claude NLP. El cálculo y la generación del\n// análisis comparativo también se beneficiarán de Claude para\n// respuestas más personalizadas y narrativas.\n// ============================================================\n\nconst inp         = $('🔍 Validar Input ATLAS').first().json;\nconst destResult  = $('🗄️ DB — Cargar Destinos').first().json;\nconst quotesResult = $input.first().json; // resultado del DB quotes\n\n// ── SETUP ──────────────────────────────────────────────────\nconst ctx   = inp.sessionContext || {};\nconst atlas = { ...(ctx.atlas || {}) };\nconst sage  = ctx.sage  || {}; // contexto de SAGE si existe\nconst state = atlas.state || 'welcome';\nconst txt   = (inp.messageText || '').toLowerCase().trim();\nconst fn    = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm    = fn ? ` ${fn}` : '';\n\n// Datos de destinos desde DB\nconst destinations = (destResult.success && destResult.data) ? destResult.data : [];\n// Cotizaciones existentes en DB\nconst dbQuotes     = (quotesResult.success && quotesResult.data) ? quotesResult.data : [];\n// Cotizaciones locales en contexto (ingresadas en esta sesión)\nconst localQuotes  = atlas.quotes || [];\n// Unir: DB primero (más completas), luego locales que no tengan equivalente\nconst allQuotes    = dbQuotes.length > 0 ? dbQuotes : localQuotes;\n\n// Tipo de procedimiento (heredado de SAGE si disponible)\nconst procType = atlas.procedure_type || sage.specialty || 'dental';\nconst recoveryField = procType === 'dental' ? 'avg_recovery_days_dental' : 'avg_recovery_days_plastic';\n\n// Helper de formato\nconst usd = (n) => {\n  const num = parseFloat(n) || 0;\n  return `$${num.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})} USD`;\n};\n\nlet rt  = '';         // responseText\nlet nag = 'ATLAS';   // newActiveAgent\nlet nss = 'atlas_active'; // newSessionState\n\nswitch(state) {\n\n  // ── BIENVENIDA ─────────────────────────────────────────────\n  case 'welcome':\n  case 'handoff_received': {\n    const procName = sage.procedure_name ? `\\n\\nVeo que SAGE preparó tu solicitud de *${sage.procedure_name}*. ` : '';\n    rt = `Hola${nm}, soy *ATLAS* 🗺️, tu consejero de turismo médico de Pangi.${procName}\\n\\nMi especialidad es calcular el *costo total real* de tu viaje médico: procedimiento + vuelo + alojamiento + días de recuperación.\\n\\nTengo datos actualizados de *10 destinos* en Latinoamérica y USA.\\n\\n*¿Ya tienes cotizaciones de médicos para comparar?*\\n\\n1️⃣ *Sí, tengo cotizaciones* — Calculo el costo total por destino\\n2️⃣ *No tengo aún* — Te muestro un panorama general de destinos\\n\\nEscribe 1 o 2.`;\n    atlas.state = 'has_quotes_check';\n    atlas.procedure_type = procType;\n    break;\n  }\n\n  // ── ¿TIENE COTIZACIONES? ────────────────────────────────────\n  case 'has_quotes_check': {\n    const hasQ  = /^[s1si]$|s[íi]|tengo|yes|cuento/.test(txt);\n    const noQ   = /^[n2no]$|no |todavía|aun|explorar/.test(txt);\n\n    if (hasQ || allQuotes.length >= 1) {\n      if (allQuotes.length >= 2) {\n        // Ya tiene cotizaciones en DB — ir directo a análisis\n        atlas.state  = 'analyzing';\n        atlas.quotes = allQuotes;\n        // Recalcular en el siguiente mensaje; aquí confirmamos\n        rt = `Perfecto${nm}, encontré ${allQuotes.length} cotizaciones guardadas. Escribe *comparar* para ver el análisis completo de costos totales.`;\n      } else {\n        atlas.state  = 'entering_quotes';\n        atlas.quotes = allQuotes;\n        rt = `Perfecto${nm} 📊 Ingresemos tus cotizaciones.\\n\\n*Formato para ingresar:*\\n📝 Escribe: *País - Ciudad - Precio del procedimiento*\\n\\n*Ejemplo:*\\n• Colombia - Medellín - $800\\n• México - Cancún - $650\\n\\nEscribe tu primera cotización.`;\n      }\n    } else if (noQ) {\n      atlas.state = 'exploring';\n      if (destinations.length === 0) {\n        rt = `Estoy cargando información de destinos${nm}...`;\n        break;\n      }\n      const destLines = destinations\n        .filter(d => d.city !== 'Miami')\n        .map(d => {\n          const rec = d[recoveryField] || 3;\n          const total_est = (d.avg_flight_cost_usd || 0) + ((d.avg_hotel_cost_per_night_usd || 70) * rec);\n          return `🌎 *${d.city}, ${d.country}*\\n   ✈️ Vuelo: ~${usd(d.avg_flight_cost_usd)} | 🏨 Hotel/noche: ~${usd(d.avg_hotel_cost_per_night_usd)} | ⏱️ Recuperación: ${rec} días\\n   💰 Costo viaje est. (sin procedimiento): ~${usd(total_est)}`;\n        }).join('\\n\\n');\n\n      rt = `Aquí tienes los principales destinos de turismo médico${nm}:\\n\\n${destLines}\\n\\n🇺🇸 *Miami, USA* — precio de referencia local (para comparar cuánto ahorras)\\n\\n*Para calcular el costo total real* necesitas cotizaciones de médicos.\\n\\n¿Quieres que te conecte con *SAGE* para preparar tu solicitud? Escribe *sí* o sigue explorando.`;\n    } else {\n      rt = `Por favor escribe *1* si tienes cotizaciones o *2* si quieres explorar destinos${nm}.`;\n    }\n    break;\n  }\n\n  // ── MODO EXPLORACIÓN ────────────────────────────────────────\n  case 'exploring': {\n    const wantsSage    = /sage|nueva solicitud/i.test(txt);\n    const wantsCompare = /^comparar$|ver comparac|analiz/i.test(txt);\n    const wantsEnter   = /cotizac|ingresar|tengo cotizac|1/i.test(txt);\n  \n    // Detectar cotización ingresada directamente desde exploración\n    // Formato: \"País - Ciudad - $Precio\" o variantes\n    const priceMatch  = txt.match(/\\$?([\\d][\\d,\\.]*[\\d])\\s*(?:usd|dólares?|dolares?)?/i);\n    const price       = priceMatch ? parseFloat(priceMatch[1].replace(/,/g,'')) : null;\n    const destMatch   = price ? destinations.find(d =>\n      txt.includes(d.city.toLowerCase()) ||\n      txt.includes(d.country.toLowerCase())\n    ) : null;\n    const hasQuoteFormat = !!(price && destMatch);\n  \n    if (wantsSage) {\n      rt  = `¡Perfecto${nm}! Te conecto con *SAGE* 🩺 para preparar tu solicitud.\\n\\nCuando tengas cotizaciones, regresa con ATLAS para el análisis.`;\n      nag = 'SAGE'; nss = 'handoff_received'; atlas.state = 'handoff_to_sage';\n  \n    } else if (hasQuoteFormat) {\n      // Usuario ingresó cotización directamente sin pasar por entering_quotes\n      const quotes = atlas.quotes || [];\n      quotes.push({ destination_city: destMatch.city, destination_country: destMatch.country, procedure_cost: price });\n      atlas.quotes = quotes;\n      atlas.state  = quotes.length >= 2 ? 'entering_quotes' : 'entering_quotes';\n  \n      if (quotes.length === 1) {\n        rt = `✅ Cotización registrada: *${destMatch.city}* — ${usd(price)}\\n\\nAgrega al menos una más y escribe *comparar* para ver el análisis de costos totales.`;\n      } else {\n        rt = `✅ Cotización ${quotes.length} registrada: *${destMatch.city}* — ${usd(price)}\\n\\nYa tienes ${quotes.length} cotizaciones. Escribe *comparar* para ver el análisis completo.`;\n      }\n  \n    } else if (wantsCompare) {\n      const quotes = atlas.quotes || [];\n      if (quotes.length >= 2) {\n        // Trigger análisis inmediato\n        atlas.state = 'comparison_done';\n        const analysis = quotes.map(q => {\n          const destData  = destinations.find(d =>\n            d.city.toLowerCase() === q.destination_city.toLowerCase() ||\n            d.country.toLowerCase() === q.destination_country.toLowerCase()\n          );\n          const flightCost = parseFloat(destData ? destData.avg_flight_cost_usd : 400);\n          const hotelNight = parseFloat(destData ? destData.avg_hotel_cost_per_night_usd : 80);\n          const recDays    = parseInt(destData ? destData[recoveryField] : 3);\n          const hotelCost  = hotelNight * recDays;\n          const totalCost  = parseFloat(q.procedure_cost) + flightCost + hotelCost;\n          return { ...q, flightCost, hotelNight, recDays, hotelCost, totalCost };\n        }).sort((a, b) => a.totalCost - b.totalCost);\n  \n        atlas.analysis        = analysis;\n        atlas.best_destination = analysis[0].destination_city;\n  \n        const medals = ['🥇','🥈','🥉','4️⃣','5️⃣'];\n        const table  = analysis.map((a, i) =>\n          `${medals[i]||`${i+1}.`} *${a.destination_city}, ${a.destination_country}*\\n   💊 Procedimiento: ${usd(a.procedure_cost)}\\n   ✈️ Vuelo: ${usd(a.flightCost)}\\n   🏨 Hotel (${a.recDays} noche${a.recDays>1?'s':''}): ${usd(a.hotelCost)}\\n   💰 *TOTAL REAL: ${usd(a.totalCost)}*`\n        ).join('\\n\\n');\n  \n        const saving = analysis.length > 1\n          ? analysis[analysis.length-1].totalCost - analysis[0].totalCost : 0;\n        const recText = saving > 0\n          ? `✅ *${analysis[0].destination_city}* es la opción más económica, ahorrando *${usd(saving)}* vs la más cara.`\n          : `✅ *${analysis[0].destination_city}* es tu mejor opción.`;\n  \n        rt = `📊 *Comparación de Destinos — Costo Total Real*\\n\\n${table}\\n\\n${recText}\\n\\nEscribe *checklist* para ver la lista de preparación para viajar a ${analysis[0].destination_city}.`;\n      } else {\n        rt = `Necesito al menos 2 cotizaciones para comparar${nm}. Tienes ${quotes.length}.\\n\\nIngresa en formato: *País - Ciudad - $Precio*`;\n      }\n  \n    } else if (wantsEnter) {\n      atlas.state = 'entering_quotes';\n      rt = `Listo${nm}. Ingresa tu primera cotización en formato:\\n*País - Ciudad - $Precio*\\n\\nEjemplo: Colombia - Medellín - $800`;\n  \n    } else {\n      rt = `¿Quieres que te ayude con algo en particular${nm}?\\n\\n📊 Escribe una cotización — Formato: *País - Ciudad - $Precio*\\n📊 Escribe *comparar* — Si ya tienes 2+ cotizaciones\\n🩺 Escribe *sage* — Para preparar solicitud de cotización`;\n    }\n    break;\n  }\n\n  // ── INGRESO DE COTIZACIONES ─────────────────────────────────\n  case 'entering_quotes': {\n    const quotes = [...(atlas.quotes || [])];\n\n    // Detectar si el usuario pide comparar con las que ya tiene\n    const wantsCompare = /comparar|analiz|listo|ver|ok|calcula|suficiente/i.test(txt);\n    if (wantsCompare && quotes.length >= 2) {\n      atlas.state  = 'analyzing';\n      atlas.quotes = quotes;\n      // Generar análisis inmediatamente\n      // Fall-through a 'analyzing' state - usaremos goto pattern\n      // (En N8N esto se maneja con el mismo mensaje; el usuario recibirá el análisis)\n    }\n\n    // Extraer precio del mensaje\n    const priceMatch = txt.match(/\\$?([\\d][\\d,\\.]*[\\d])\\s*(?:usd|dólares?|dolares?)?/i);\n    const price      = priceMatch ? parseFloat(priceMatch[1].replace(/,/g,'')) : null;\n\n    // Identificar destino\n    const destMatch = destinations.find(d =>\n      txt.includes(d.city.toLowerCase())    ||\n      txt.includes(d.country.toLowerCase())\n    );\n\n    if (!price && !wantsCompare) {\n      rt = `No pude extraer el precio de tu cotización${nm}. Usa el formato:\\n\\n*País - Ciudad - $Precio*\\n\\nEjemplo:\\n• Colombia - Medellín - $800\\n• México - CDMX - $1200`;\n      break;\n    }\n\n    if (price && destMatch) {\n      const newQuote = {\n        destination_city:    destMatch.city,\n        destination_country: destMatch.country,\n        procedure_cost:      price\n      };\n      quotes.push(newQuote);\n      atlas.quotes = quotes;\n\n      if (quotes.length < 2) {\n        rt = `✅ Cotización registrada: *${destMatch.city}* — ${usd(price)}\\n\\nAgrega más cotizaciones para comparar, o escribe *comparar* cuando tengas al menos 2.`;\n      } else {\n        rt = `✅ Cotización ${quotes.length} registrada: *${destMatch.city}* — ${usd(price)}\\n\\nTienes ${quotes.length} cotizaciones. Escribe *comparar* para ver el análisis, o agrega más.`;\n        atlas.state = 'analyzing';\n      }\n    }\n\n    // Si el usuario quiere comparar y tiene suficientes cotizaciones\n    if ((wantsCompare || atlas.state === 'analyzing') && quotes.length >= 2) {\n      atlas.state  = 'comparison_done';\n      const analysis = quotes.map(q => {\n        const destData  = destinations.find(d =>\n          d.city.toLowerCase()    === q.destination_city.toLowerCase()    ||\n          d.country.toLowerCase() === q.destination_country.toLowerCase()\n        );\n        const flightCost = parseFloat(destData ? destData.avg_flight_cost_usd          : 400);\n        const hotelNight = parseFloat(destData ? destData.avg_hotel_cost_per_night_usd : 80);\n        const recDays    = parseInt(destData   ? destData[recoveryField]               : 3);\n        const hotelCost  = hotelNight * recDays;\n        const totalCost  = parseFloat(q.procedure_cost) + flightCost + hotelCost;\n        return { ...q, flightCost, hotelNight, recDays, hotelCost, totalCost, climate: destData ? destData.climate_type : '' };\n      }).sort((a, b) => a.totalCost - b.totalCost);\n\n      atlas.analysis     = analysis;\n      atlas.best_destination = analysis[0].destination_city;\n\n      const medals   = ['🥇','🥈','🥉','4️⃣','5️⃣'];\n      const table    = analysis.map((a, i) => `${medals[i] || `${i+1}.`} *${a.destination_city}, ${a.destination_country}*\\n   💊 Procedimiento: ${usd(a.procedure_cost)}\\n   ✈️ Vuelo estimado: ${usd(a.flightCost)}\\n   🏨 Hotel (${a.recDays} noche${a.recDays>1?'s':''}): ${usd(a.hotelCost)}\\n   💰 *TOTAL REAL: ${usd(a.totalCost)}*`).join('\\n\\n');\n\n      const saving   = analysis.length > 1 ? analysis[analysis.length-1].totalCost - analysis[0].totalCost : 0;\n      const best     = analysis[0];\n      const recText  = saving > 0\n        ? `✅ *${best.destination_city}* ofrece el mejor costo total, ahorrando *${usd(saving)}* vs la opción más cara.`\n        : `✅ *${best.destination_city}* es tu mejor opción en costo total.`;\n\n      rt = `📊 *Comparación de Destinos — Costo Total Real*\\n*Procedimiento: ${sage.procedure_name || procType}*\\n\\n${table}\\n\\n${recText}\\n\\n¿Quieres ver el *checklist pre-viaje* para viajar a ${best.destination_city}? Escribe *checklist*.`;\n    }\n    break;\n  }\n\n  // ── ANÁLISIS DIRECTO (cotizaciones ya en DB) ────────────────\n  case 'analyzing': {\n    const quotes = allQuotes.length > 0 ? allQuotes : (atlas.quotes || []);\n    if (quotes.length < 2) {\n      rt = `Necesito al menos 2 cotizaciones para hacer la comparación${nm}. Actualmente tienes ${quotes.length}.\\n\\nEscribe una cotización en formato: *País - Ciudad - Precio*`;\n      atlas.state = 'entering_quotes';\n      break;\n    }\n\n    atlas.state = 'comparison_done';\n    const analysis = quotes.map(q => {\n      const destData  = destinations.find(d =>\n        d.city.toLowerCase()    === (q.destination_city || '').toLowerCase()    ||\n        d.country.toLowerCase() === (q.destination_country || '').toLowerCase()\n      );\n      const flightCost = parseFloat(destData ? destData.avg_flight_cost_usd          : 400);\n      const hotelNight = parseFloat(destData ? destData.avg_hotel_cost_per_night_usd : 80);\n      const recDays    = parseInt(destData   ? destData[recoveryField]               : 3);\n      const hotelCost  = hotelNight * recDays;\n      const totalCost  = parseFloat(q.procedure_cost) + flightCost + hotelCost;\n      return { ...q, flightCost, hotelNight, recDays, hotelCost, totalCost };\n    }).sort((a, b) => a.totalCost - b.totalCost);\n\n    atlas.analysis        = analysis;\n    atlas.best_destination = analysis[0].destination_city;\n\n    const medals  = ['🥇','🥈','🥉','4️⃣','5️⃣'];\n    const table   = analysis.map((a, i) => `${medals[i] || `${i+1}.`} *${a.destination_city}, ${a.destination_country}*\\n   💊 Procedimiento: ${usd(a.procedure_cost)}\\n   ✈️ Vuelo estimado: ${usd(a.flightCost)}\\n   🏨 Hotel (${a.recDays} noche${a.recDays>1?'s':''}): ${usd(a.hotelCost)}\\n   💰 *TOTAL REAL: ${usd(a.totalCost)}*`).join('\\n\\n');\n\n    const saving  = analysis.length > 1 ? analysis[analysis.length-1].totalCost - analysis[0].totalCost : 0;\n    const recText = saving > 0\n      ? `✅ *${analysis[0].destination_city}* es la opción más económica, ahorrando *${usd(saving)}* vs la más cara.`\n      : `✅ *${analysis[0].destination_city}* es tu mejor opción.`;\n\n    rt = `📊 *Análisis de Costos Totales*\\n\\n${table}\\n\\n${recText}\\n\\nEscribe *checklist* para ver la lista de preparación para viajar a ${analysis[0].destination_city}.`;\n    break;\n  }\n\n  // ── ANÁLISIS COMPLETO ────────────────────────────────────────\n  case 'comparison_done': {\n    const wantsChecklist = /checklist|lista|preparar|qué llev|llevar|documentos|preparacion/i.test(txt);\n    const wantsMore      = /más cotizac|otra cotizac|agregar|nueva/i.test(txt);\n    const wantsSage      = /sage|nueva solicitud|otro procedimiento/i.test(txt);\n    const best           = atlas.best_destination || 'el destino elegido';\n\n    if (wantsChecklist) {\n      atlas.state = 'checklist_shown';\n      const baseItems = [\n        '📋 Pasaporte vigente (mínimo 6 meses de validez)',\n        '📄 Historial médico relevante (diagnósticos, cirugías previas)',\n        '💊 Lista completa de medicamentos actuales',\n        '💳 Tarjeta de crédito/débito con cupo internacional',\n        '📱 Seguro de viaje con cobertura médica (altamente recomendado)',\n        '🏨 Reserva de hotel confirmada cerca de la clínica',\n        '✈️ Vuelos con fecha de retorno flexible (en caso de complicaciones)',\n        '📞 Contacto de emergencia notificado del viaje'\n      ];\n      const dentalItems = [\n        '🦷 Radiografías recientes (panorámica y/o periapicales)',\n        '📷 Fotografías de la boca/sonrisa (frente y perfil)',\n        '⏰ Coordinar estadía mínima de 3-7 días según procedimiento',\n        '🚫 Evitar fumar 48h antes del procedimiento dental'\n      ];\n      const plasticItems = [\n        '📸 Fotografías corporales: frente, perfil y 3/4',\n        '🩺 Exámenes preoperatorios completos (sangre, coagulación, ECG)',\n        '⏰ Coordinar estadía mínima de 14-21 días para recuperación segura',\n        '👕 Ropa cómoda y holgada para el período post-operatorio',\n        '🚫 No fumar durante al menos 2 semanas antes de la cirugía',\n        '💊 Informar todos los medicamentos y suplementos al cirujano'\n      ];\n      const extra = procType === 'dental' ? dentalItems : plasticItems;\n      const allItems = [...baseItems, ...extra].map((item, i) => `${i+1}. ${item}`).join('\\n');\n\n      rt = `✅ *Checklist Pre-Viaje — ${best}*\\n*Procedimiento: ${sage.procedure_name || procType}*\\n\\n${allItems}\\n\\n⚠️ *Importante:* Confirma los requisitos específicos con tu médico al agendar. Esta lista es orientativa.\\n\\n¿Hay algo más en lo que pueda ayudarte?`;\n    } else if (wantsMore) {\n      atlas.state = 'entering_quotes';\n      rt = `Claro${nm}, ingresa la nueva cotización:\\n*País - Ciudad - Precio*`;\n    } else if (wantsSage) {\n      rt = `Por supuesto${nm}. Te conecto con *SAGE* 🩺 para preparar una nueva solicitud de cotización.`;\n      nag = 'SAGE';\n      nss = 'handoff_received';\n      atlas.state = 'handoff_to_sage';\n    } else {\n      rt = `¿En qué más puedo ayudarte${nm}?\\n\\n📋 Escribe *checklist* — Lista de preparación para ${best}\\n📊 Escribe *nueva cotización* — Agregar otra cotización a la comparación\\n🩺 Escribe *sage* — Preparar nueva solicitud de cotización`;\n    }\n    break;\n  }\n\n  // ── CHECKLIST MOSTRADO ──────────────────────────────────────\n  case 'checklist_shown': {\n    rt = `¿Tienes alguna pregunta adicional sobre el viaje médico a ${atlas.best_destination || 'tu destino elegido'}${nm}? 🗺️\\n\\nEstoy aquí para ayudarte en lo que necesites.`;\n    break;\n  }\n\n  // ── FALLBACK ────────────────────────────────────────────────\n  default: {\n    rt = `Hola${nm}, soy *ATLAS* 🗺️ tu consejero de turismo médico. Escribe *1* si tienes cotizaciones o *2* para explorar destinos.`;\n    atlas.state = 'welcome';\n  }\n}\n\n// ── RESULTADO ──────────────────────────────────────────────\nreturn [{ json: {\n  success:           true,\n  responseText:      rt,\n  newActiveAgent:    nag,\n  newSessionState:   nss,\n  newAtlasContext:   atlas,\n  inputContext:      ctx,\n  userId:            parseInt(inp.userId),\n  sessionId:         parseInt(inp.sessionId),\n  userLanguage:      inp.userLanguage || 'es',\n  userName:          inp.userName    || null,\n  remoteJid:         inp.remoteJid,\n  instance:          inp.instance\n}}];"
+      },
+      "id": "f12d7a65-613b-43f5-98fb-b70d9293a32a",
+      "name": "🗺️ ATLAS — Motor de Análisis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Construye la respuesta final de ATLAS.\n// Ensambla newSessionContext con el atlas context actualizado.\n// ============================================================\n\nconst motor = $input.first().json;\n\nif (!motor.success) {\n  return [{ json: {\n    success:        false,\n    error:          motor.error || 'ATLAS_ENGINE_ERROR',\n    responseText:   'Error interno en ATLAS. Por favor escribe de nuevo.',\n    newActiveAgent: 'ATLAS'\n  }}];\n}\n\nconst newSessionContext = {\n  ...(motor.inputContext || {}),\n  atlas: motor.newAtlasContext\n};\n\nreturn [{ json: {\n  success:            true,\n  responseText:       motor.responseText,\n  newActiveAgent:     motor.newActiveAgent  || 'ATLAS',\n  newSessionState:    motor.newSessionState || 'atlas_active',\n  newSessionContext,\n  userId:             motor.userId,\n  sessionId:          motor.sessionId,\n  userLanguage:       motor.userLanguage    || 'es',\n  userName:           motor.userName        || null,\n  remoteJid:          motor.remoteJid,\n  instance:           motor.instance\n}}];"
+      },
+      "id": "c206316a-51ca-4f3d-ab5c-a9bab25d7e63",
+      "name": "📤 Construir Respuesta Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nreturn [{ json: {\n  success:        false,\n  error:          e.error   || 'ATLAS_ENGINE_ERROR',\n  details:        e.details || [],\n  responseText:   'Lo siento, tuve un problema técnico. Por favor escribe de nuevo en unos momentos.',\n  newActiveAgent: 'ATLAS',\n  _meta: { timestamp: new Date().toISOString(), source: 'atlas_error' }\n}}];"
+      },
+      "id": "bd62c61b-a17b-4819-bbcd-aeae3c9e7491",
+      "name": "❌ Error ATLAS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "path": "1a31031b-3eae-47f1-b8d8-6ed2e066783e",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        -32
+      ],
+      "id": "a6d178b9-16bd-4307-89dc-1c3bb20af268",
+      "name": "Webhook",
+      "webhookId": "1a31031b-3eae-47f1-b8d8-6ed2e066783e"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "📥 Llamada Entrante": {
+      "main": [
+        [
+          {
+            "node": "🔍 Validar Input ATLAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Validar Input ATLAS": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Input Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Input Válido?": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — getDestinations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Error ATLAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Preparar — getDestinations": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Cargar Destinos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Cargar Destinos": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — getQuotes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Preparar — getQuotes": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Cargar Cotizaciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Cargar Cotizaciones": {
+      "main": [
+        [
+          {
+            "node": "🗺️ ATLAS — Motor de Análisis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗺️ ATLAS — Motor de Análisis": {
+      "main": [
+        [
+          {
+            "node": "📤 Construir Respuesta Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7449c9e0-4e47-417c-b9d5-674cd41ba258",
+  "meta": {
+    "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
+  },
+  "id": "ItgP3qsoKkZt8TcJ",
+  "tags": []
+}

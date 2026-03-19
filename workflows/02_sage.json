@@ -1,0 +1,276 @@
+{
+  "name": "02_sage",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "62a379e2-33c9-4842-9bbe-fb12be182567",
+      "name": "📥 Llamada Entrante",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $input.first().json;\nconst REQUIRED = ['userId','sessionId','remoteJid','instance'];\nconst missing  = REQUIRED.filter(k => !inp[k]);\nif (missing.length) {\n  return [{ json: { success: false, error: 'MISSING_FIELDS', details: missing, original: inp } }];\n}\nreturn [{ json: { success: true, ...inp } }];"
+      },
+      "id": "d1045dc2-539f-4d41-bb9b-65faddc0556b",
+      "name": "🔍 Validar Input SAGE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "sage-cond-1",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1aca7bc1-70f8-4de2-a9ae-d4fd4c91bd79",
+      "name": "✅ ¿Input Válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Carga datos del KB solo si procedure_key ya existe en el contexto\n// (fue seleccionado en un mensaje anterior).\n// Si no existe, devuelve __skip__ para que db_manager retorne vacío gracefully.\nconst ctx  = $input.first().json.sessionContext || {};\nconst sage = ctx.sage || {};\nconst key  = sage.procedure_key || null;\n\nif (!key) {\n  // No hay procedimiento seleccionado aún — skip DB call\n  return [{ json: { operation: '__skip__', params: {} } }];\n}\nreturn [{ json: { operation: 'getProcedure', params: { procedureKey: key } } }];"
+      },
+      "id": "c17dc4eb-fecf-40cd-9b5a-ea55c2a5128b",
+      "name": "📦 Preparar — getProcedure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "7036fbea-3997-4f5b-ae54-9b47e9322003",
+      "name": "🗄️ DB — Cargar Procedimiento",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// SAGE v1.0.0 — Especialista en Cotizaciones Médicas\n// Sistema NOVA · SAGE · ATLAS + WhatsApp\n// Erick Del Piero | Marzo 2026\n//\n// MOTOR DE ESTADO:\n//   welcome / handoff_received → Bienvenida + selección de especialidad\n//   selecting_specialty        → Detecta especialidad y muestra lista de procedimientos\n//   selecting_procedure        → Usuario elige procedimiento, guarda key en ctx\n//   procedure_confirmed        → KB data disponible, inicia Q&A\n//   questioning                → Pregunta y guarda respuestas secuencialmente\n//   summary                    → Muestra resumen + score de completitud\n//   complete                   → Intake enviado, ofrece ATLAS\n//\n// DISEÑO PARA CLAUDE UPGRADE:\n// Los estados 'questioning' y 'summary' serán reemplazados por\n// llamadas a Claude API que extraerán datos con NLP y generarán\n// respuestas conversacionales más naturales. El resto del estado\n// machine permanece igual.\n// ============================================================\n\nconst inp            = $('🔍 Validar Input SAGE').first().json;\nconst procedureResult = $input.first().json; // resultado de DB — Cargar Procedimiento\n\n// ── SETUP ──────────────────────────────────────────────────\nconst ctx  = inp.sessionContext || {};\nconst sage = { ...(ctx.sage || {}) };\nconst state = sage.state || 'welcome';\nconst txt  = (inp.messageText || '').toLowerCase().trim();\nconst fn   = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm   = fn ? ` ${fn}` : '';\n\n// Datos del KB (disponibles si procedure_key estaba en ctx al inicio del mensaje)\nconst parseArr = (v) => {\n  if (!v) return [];\n  if (Array.isArray(v)) return v;\n  try { return JSON.parse(v); } catch(e) { return []; }\n};\nconst procData = (procedureResult.success && procedureResult.data && procedureResult.data.length > 0)\n  ? procedureResult.data[0] : null;\n\n// Lista de procedimientos hardcodeada (sincronizada con KB en DB)\n// Evita round-trips innecesarios para mostrar el menú de selección.\nconst PROCEDURES = {\n  dental: [\n    { name: 'Extracción Simple',             key: 'extraccion_simple'    },\n    { name: 'Extracción Muela del Juicio',    key: 'extraccion_muela_juicio' },\n    { name: 'Implante Dental',               key: 'implante_dental'     },\n    { name: 'Prótesis Dental Completa',      key: 'protesis_completa'   },\n    { name: 'Carillas / Veneers',            key: 'carillas_veneers'    },\n    { name: 'Ortodoncia Brackets',           key: 'ortodoncia_brackets' },\n    { name: 'Ortodoncia Invisible',          key: 'ortodoncia_invisible'},\n    { name: 'Endodoncia (Conducto)',         key: 'endodoncia'          },\n    { name: 'Corona Dental',                 key: 'corona_dental'       },\n    { name: 'Limpieza Profunda (Periodoncia)', key: 'limpieza_profunda'  },\n    { name: 'Blanqueamiento Dental',         key: 'blanqueamiento'      },\n    { name: 'Puente Dental',                 key: 'puente_dental'       }\n  ],\n  plastic_surgery: [\n    { name: 'Rinoplastia',                   key: 'rinoplastia'         },\n    { name: 'Abdominoplastia',               key: 'abdominoplastia'     },\n    { name: 'Liposucción',                   key: 'liposuccion'         },\n    { name: 'Aumento de Busto',              key: 'aumento_mamario'     },\n    { name: 'Reducción de Busto',            key: 'reduccion_mamaria'   },\n    { name: 'Bichectomía',                   key: 'bichectomia'         },\n    { name: 'Blefaroplastia (Párpados)',      key: 'blefaroplastia'      },\n    { name: 'Otoplastia (Orejas)',            key: 'otoplastia'          },\n    { name: 'Lifting Facial',                key: 'lifting_facial'      },\n    { name: 'BBL (Brazilian Butt Lift)',      key: 'bbl'                 }\n  ]\n};\n\nlet rt  = '';         // responseText\nlet nag = 'SAGE';    // newActiveAgent\nlet nss = 'sage_active'; // newSessionState\nlet shouldSaveIntake = false;\nlet intakePayload    = null;\n\nswitch(state) {\n\n  // ── BIENVENIDA ─────────────────────────────────────────────\n  case 'welcome':\n  case 'handoff_received': {\n    rt = `Hola${nm}, soy *SAGE* 🩺 tu especialista en cotizaciones médicas de Pangi.\\n\\nMi trabajo es preparar tu solicitud para que los médicos puedan darte precios *precisos*. Mientras más información des, mejores cotizaciones recibirás.\\n\\nPrimero dime: *¿Para qué especialidad necesitas cotizar?*\\n\\n🦷 Escribe *1* o *dental*\\n💉 Escribe *2* o *cirugía plástica*`;\n    sage.state = 'selecting_specialty';\n    break;\n  }\n\n  // ── SELECCIÓN DE ESPECIALIDAD ──────────────────────────────\n  case 'selecting_specialty': {\n    const kDental   = /dental|diente|muela|implante|ortodoncia|corona|carilla|veneer|blanquea|endodoncia|extrac|puente|prótesis|protesis|limpieza|conducto/i;\n    const kPlastic  = /plastic|cirugía|cirugia|rinoplas|liposu|abdominoplas|mamario|busto|seno|bichec|blefaroplas|otoplas|lifting|bbl|nariz|glút|glut/i;\n    const isDental  = kDental.test(txt) || txt === '1';\n    const isPlastic = kPlastic.test(txt) || txt === '2';\n\n    if (!isDental && !isPlastic) {\n      rt = `No reconocí la especialidad${nm} 😅\\n\\nPor favor elige una opción:\\n🦷 Escribe *1* o *dental*\\n💉 Escribe *2* o *cirugía plástica*`;\n      // Mantener estado\n      break;\n    }\n\n    const sp    = isDental ? 'dental' : 'plastic_surgery';\n    const emoji = isDental ? '🦷' : '💉';\n    const procs = PROCEDURES[sp];\n    const list  = procs.map((p, i) => `${i + 1}. ${p.name}`).join('\\n');\n\n    sage.specialty = sp;\n    rt = `${emoji} Perfecto. ¿Sobre qué procedimiento específico deseas cotizar?\\n\\n${list}\\n\\nEscribe el número o el nombre del procedimiento.`;\n    sage.state = 'selecting_procedure';\n    break;\n  }\n\n  // ── SELECCIÓN DE PROCEDIMIENTO ─────────────────────────────\n  case 'selecting_procedure': {\n    const sp    = sage.specialty || 'dental';\n    const procs = PROCEDURES[sp] || [];\n    let matched = null;\n\n    // Match por número\n    const num = parseInt(txt);\n    if (!isNaN(num) && num >= 1 && num <= procs.length) {\n      matched = procs[num - 1];\n    }\n    // Match por nombre completo o key\n    if (!matched) {\n      matched = procs.find(p =>\n        txt.includes(p.name.toLowerCase()) ||\n        txt.includes(p.key.replace(/_/g, ' '))\n      );\n    }\n    // Match flexible (al menos 1 palabra significativa)\n    if (!matched) {\n      matched = procs.find(p => {\n        const words = p.name.toLowerCase().split(' ').filter(w => w.length > 4);\n        return words.some(w => txt.includes(w));\n      });\n    }\n\n    if (!matched) {\n      const emoji = sp === 'dental' ? '🦷' : '💉';\n      const list  = procs.map((p, i) => `${i + 1}. ${p.name}`).join('\\n');\n      rt = `No encontré ese procedimiento${nm}. Por favor elige de la lista:\\n\\n${emoji} *Procedimientos disponibles:*\\n${list}`;\n      // Mantener estado\n      break;\n    }\n\n    sage.procedure_key  = matched.key;\n    sage.procedure_name = matched.name;\n    sage.state          = 'procedure_confirmed';\n\n    rt = `*${matched.name}* ✅\\n\\nVoy a hacerte algunas preguntas para preparar tu solicitud. Mientras más detalles des, más precisas serán las cotizaciones que recibirás.\\n\\nEscribe *listo* o cualquier cosa para empezar.`;\n    break;\n  }\n\n  // ── PROCEDIMIENTO CONFIRMADO — espera datos del KB ─────────\n  // En este estado, procedure_key ya está en ctx.\n  // En ESTE mensaje el KB ya fue cargado desde DB (procedure_key existía al inicio).\n  case 'procedure_confirmed': {\n    if (!procData) {\n      // KB aún no disponible — situación de borde, reintentar\n      rt = `Preparando tu formulario${nm}... un momento 🩺`;\n      break; // Mantener estado\n    }\n\n    const questions = parseArr(procData.critical_questions);\n    const infoKeys  = parseArr(procData.required_info);\n\n    // Guardar KB data en contexto para no volver a consultarla\n    sage.critical_questions  = questions;\n    sage.required_info       = infoKeys;\n    sage.required_exams      = parseArr(procData.required_exams);\n    sage.typical_recovery    = procData.typical_recovery_days || 3;\n    sage.collected_data      = {};\n    sage.current_q_index     = 1; // Mostraremos pregunta[0] ahora\n    sage.state               = 'questioning';\n\n    const intro = procData.sage_intro_message || `Empecemos con *${sage.procedure_name}*:`;\n    rt = `${intro}\\n\\n*Pregunta 1 de ${questions.length}:*\\n${questions[0]}`;\n\n    // Crear el intake en DB\n    shouldSaveIntake = true;\n    intakePayload = {\n      operation: 'saveMedicalIntake',\n      params: {\n        userId:        inp.userId,\n        sessionId:     inp.sessionId,\n        specialty:     sage.specialty,\n        procedureName: sage.procedure_name,\n        collectedData: {},\n        missingItems:  sage.required_exams,\n        score:         0\n      }\n    };\n    break;\n  }\n\n  // ── Q&A — PREGUNTAS SECUENCIALES ───────────────────────────\n  case 'questioning': {\n    const questions  = sage.critical_questions || [];\n    const infoKeys   = sage.required_info      || [];\n    const currentIdx = sage.current_q_index    || 1;\n    const collected  = { ...(sage.collected_data || {}) };\n    const totalQ     = questions.length;\n\n    // Guardar respuesta a la pregunta anterior\n    // current_q_index = N significa que ya mostramos N preguntas.\n    // La respuesta actual corresponde a infoKeys[N-1] (la última mostrada).\n    if (infoKeys[currentIdx - 1]) {\n      collected[infoKeys[currentIdx - 1]] = inp.messageText;\n    }\n    sage.collected_data = collected;\n\n    const answeredCount = Object.keys(collected).length;\n    const baseScore     = Math.round((answeredCount / totalQ) * 85);\n    const examBonus     = (sage.required_exams || []).some(exam =>\n      txt.includes(exam.replace(/_/g, ' ').toLowerCase().substring(0, 5))\n    ) ? 15 : 0;\n    const score = Math.min(100, baseScore + examBonus);\n    sage.completeness_score = score;\n\n    if (currentIdx >= totalQ) {\n      // TODAS las preguntas respondidas → ir a resumen\n      sage.current_q_index = currentIdx;\n      sage.state = 'summary';\n\n      const summaryLines = Object.entries(collected)\n        .map(([k, v]) => `✅ *${k.replace(/_/g, ' ')}:* ${v}`)\n        .join('\\n');\n\n      const examsList = (sage.required_exams || []).length > 0\n        ? `\\n\\n📋 *Exámenes recomendados para llevar:*\\n${(sage.required_exams || []).map(e => `• ${e.replace(/_/g, ' ')}`).join('\\n')}`\n        : '';\n\n      const scoreLabel = score >= 80\n        ? '🟢 Excelente — Recibirás cotizaciones muy precisas'\n        : score >= 60\n          ? '🟡 Buena — Cotizaciones bastante precisas'\n          : '🔴 Básica — Considera agregar más detalles';\n\n      rt = `¡Listo${nm}! Tu solicitud de *${sage.procedure_name}* está preparada 🎉\\n\\n*Resumen de tu caso:*\\n${summaryLines}${examsList}\\n\\n📊 *Completitud: ${score}%* — ${scoreLabel}\\n\\nEscribe *confirmar* para publicar tu solicitud y comenzar a recibir cotizaciones de médicos.\\nO agrega más información para subir el score.`;\n\n      shouldSaveIntake = true;\n      intakePayload = {\n        operation: 'updateMedicalIntake',\n        params: {\n          intakeId:     sage.intake_id,\n          collectedData: collected,\n          missingItems:  sage.required_exams,\n          score,\n          status:       'in_progress'\n        }\n      };\n    } else {\n      // Mostrar siguiente pregunta\n      sage.current_q_index = currentIdx + 1;\n      const progress = `_Pregunta ${currentIdx + 1} de ${totalQ} · Completitud: ${score}%_`;\n      rt = `*${questions[currentIdx]}*\\n\\n${progress}`;\n\n      shouldSaveIntake = true;\n      intakePayload = {\n        operation: 'updateMedicalIntake',\n        params: {\n          intakeId:     sage.intake_id,\n          collectedData: collected,\n          missingItems:  sage.required_exams,\n          score\n        }\n      };\n    }\n    break;\n  }\n\n  // ── RESUMEN — CONFIRMAR ENVÍO ───────────────────────────────\n  case 'summary': {\n    const isConfirm = /confirm|sí|si|yes|enviar|publicar|listo|ok|dale|adelante/i.test(txt);\n\n    if (isConfirm) {\n      rt  = `✅ *¡Solicitud publicada${fn ? ', ' + fn : ''}!*\\n\\nTu solicitud de *${sage.procedure_name}* ya está visible para los médicos de Pangi.\\n\\n⏱️ *Tiempo estimado de respuesta:* 24-48 horas\\n\\n*¿Qué sigue?*\\nCuando recibas cotizaciones de distintos destinos, *ATLAS* puede calcular el costo total real de cada opción considerando vuelo, alojamiento y días de recuperación.\\n\\n¿Quieres que te conecte con ATLAS ahora para explorar destinos?`;\n      sage.state = 'complete';\n      shouldSaveIntake = true;\n      intakePayload = {\n        operation: 'updateMedicalIntake',\n        params: {\n          intakeId: sage.intake_id,\n          status:   'submitted',\n          score:    sage.completeness_score || 0\n        }\n      };\n    } else {\n      // Usuario quiere agregar más información\n      const prev = sage.collected_data || {};\n      prev['detalle_adicional'] = inp.messageText;\n      sage.collected_data = prev;\n      const newScore = Math.min(100, (sage.completeness_score || 70) + 8);\n      sage.completeness_score = newScore;\n      rt = `Perfecto${nm}, agregué esos detalles a tu solicitud 📋\\n\\n📊 *Completitud actualizada: ${newScore}%*\\n\\nCuando estés listo/a, escribe *confirmar* para publicar.`;\n      shouldSaveIntake = true;\n      intakePayload = {\n        operation: 'updateMedicalIntake',\n        params: {\n          intakeId:     sage.intake_id,\n          collectedData: prev,\n          score:         newScore\n        }\n      };\n    }\n    break;\n  }\n\n  // ── COMPLETO — OFRECER ATLAS ────────────────────────────────\n  case 'complete': {\n    const wantsAtlas = /atlas|compar|destino|sí|si|yes|quiero|dale|adelante/i.test(txt);\n    if (wantsAtlas) {\n      rt  = `¡Perfecto${nm}! Te conecto con *ATLAS* 🗺️, nuestro consejero de turismo médico.\\n\\nYa le compartí tu solicitud de *${sage.procedure_name}*. Él calculará el costo total real de cada destino.`;\n      nag = 'ATLAS';\n      nss = 'handoff_received';\n      sage.state = 'handoff_to_atlas';\n    } else {\n      rt = `Entendido${nm}. Cuando quieras comparar destinos, escribe *comparar* y te conecto con ATLAS 🗺️\\n\\n¿Necesitas ayuda con algo más?`;\n      sage.state = 'waiting_for_quotes';\n    }\n    break;\n  }\n\n  // ── FALLBACK ────────────────────────────────────────────────\n  default: {\n    rt = `Hola${nm}, soy *SAGE* 🩺 tu especialista en cotizaciones. Escribe cualquier cosa para empezar.`;\n    sage.state = 'welcome';\n  }\n}\n\n// ── RESULTADO ──────────────────────────────────────────────\nreturn [{ json: {\n  success:          true,\n  responseText:     rt,\n  newActiveAgent:   nag,\n  newSessionState:  nss,\n  newSageContext:   sage,\n  inputContext:     ctx,\n  shouldSaveIntake,\n  intakePayload:    intakePayload || null,\n  userId:           parseInt(inp.userId),\n  sessionId:        parseInt(inp.sessionId),\n  userLanguage:     inp.userLanguage || 'es',\n  userName:         inp.userName    || null,\n  remoteJid:        inp.remoteJid,\n  instance:         inp.instance\n}}];"
+      },
+      "id": "9311c725-95a7-4aab-b6e4-5fe628fbe101",
+      "name": "🩺 SAGE — Motor de Conversación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara el payload para save o update del intake médico.\n// Si shouldSaveIntake=false, devuelve __skip__ para saltar la DB call.\nconst motor = $input.first().json;\n\nif (!motor.shouldSaveIntake || !motor.intakePayload) {\n  // No hay intake que guardar en este mensaje\n  return [{ json: { operation: '__skip__', params: {}, _motorOutput: motor } }];\n}\n\n// Si el intake ya existe (intake_id en contexto), aseguramos que el payload sea update\nconst sage = motor.newSageContext || {};\nif (motor.intakePayload.operation === 'updateMedicalIntake' && !sage.intake_id) {\n  // Todavía no tenemos el intake_id (raro edge case) — skip\n  return [{ json: { operation: '__skip__', params: {}, _motorOutput: motor } }];\n}\n\nreturn [{ json: { ...motor.intakePayload, _motorOutput: motor } }];"
+      },
+      "id": "c398083c-a3e9-4b6b-aa9d-208206fef083",
+      "name": "📦 Preparar — Guardar Intake",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "e023f131-8c12-4029-8c42-11fd6359faba",
+      "name": "🗄️ DB — Guardar Intake",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Construye la respuesta final de SAGE.\n// Extrae intake_id de la DB si el intake fue creado ahora.\n// Ensambla newSessionContext con el sage context actualizado.\n// ============================================================\n\nconst dbResult   = $input.first().json;         // resultado del DB save/update\nconst prepNode   = $('📦 Preparar — Guardar Intake').first().json;\nconst motorOutput = prepNode._motorOutput || dbResult._motorOutput;\n\nif (!motorOutput) {\n  return [{ json: {\n    success: false,\n    error:   'MOTOR_OUTPUT_LOST',\n    responseText: 'Error interno. Por favor escribe de nuevo.',\n    newActiveAgent: 'SAGE'\n  }}];\n}\n\n// Actualizar intake_id si el intake fue recién creado\nconst sageCtx = { ...motorOutput.newSageContext };\nconst wasNewIntake = motorOutput.intakePayload && motorOutput.intakePayload.operation === 'saveMedicalIntake';\nif (wasNewIntake && dbResult.success && dbResult.data && dbResult.data[0]) {\n  sageCtx.intake_id = dbResult.data[0].id;\n}\n\n// Construir newSessionContext preservando otros agentes en el contexto\nconst newSessionContext = {\n  ...(motorOutput.inputContext || {}),\n  sage: sageCtx\n};\n\nreturn [{ json: {\n  success:            true,\n  responseText:       motorOutput.responseText,\n  newActiveAgent:     motorOutput.newActiveAgent  || 'SAGE',\n  newSessionState:    motorOutput.newSessionState || 'sage_active',\n  newSessionContext,\n  userId:             motorOutput.userId,\n  sessionId:          motorOutput.sessionId,\n  userLanguage:       motorOutput.userLanguage    || 'es',\n  userName:           motorOutput.userName        || null,\n  remoteJid:          motorOutput.remoteJid,\n  instance:           motorOutput.instance\n}}];"
+      },
+      "id": "558fe6af-23a9-4791-a1ea-d92d925ad15f",
+      "name": "📤 Construir Respuesta Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nreturn [{ json: {\n  success:        false,\n  error:          e.error   || 'SAGE_ENGINE_ERROR',\n  details:        e.details || [],\n  responseText:   'Lo siento, tuve un problema técnico. Por favor escribe de nuevo en unos momentos.',\n  newActiveAgent: 'SAGE',\n  _meta: { timestamp: new Date().toISOString(), source: 'sage_error' }\n}}];"
+      },
+      "id": "b33aab4f-be71-4d8a-bb89-92b420a0ab61",
+      "name": "❌ Error SAGE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "path": "2e33405a-a30c-401b-b829-d8da40f41504",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        -48
+      ],
+      "id": "8aa51fa7-e0e8-4d44-b890-6df95179ce10",
+      "name": "Webhook",
+      "webhookId": "2e33405a-a30c-401b-b829-d8da40f41504"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "📥 Llamada Entrante": {
+      "main": [
+        [
+          {
+            "node": "🔍 Validar Input SAGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Validar Input SAGE": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Input Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Input Válido?": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — getProcedure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Error SAGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Preparar — getProcedure": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Cargar Procedimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Cargar Procedimiento": {
+      "main": [
+        [
+          {
+            "node": "🩺 SAGE — Motor de Conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🩺 SAGE — Motor de Conversación": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — Guardar Intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Preparar — Guardar Intake": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Guardar Intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Guardar Intake": {
+      "main": [
+        [
+          {
+            "node": "📤 Construir Respuesta Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b01440a9-34ae-40e4-8c41-44ac3977cc47",
+  "meta": {
+    "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
+  },
+  "id": "NzPXTOZvxh10vc71",
+  "tags": []
+}

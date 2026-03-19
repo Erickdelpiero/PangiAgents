@@ -1,0 +1,390 @@
+{
+  "name": "04_handoff_manager",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e1b79121-8816-4eb3-a25c-10450808dfd4",
+      "name": "📥 Llamada Entrante",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1968,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PANGI HANDOFF MANAGER — Input Validator v1.0.1\n// Sistema NOVA · SAGE · ATLAS + WhatsApp\n// Erick Del Piero | Marzo 2026\n// ============================================================\n\nconst input = $input.first().json;\nconst VALID_AGENTS  = ['NOVA', 'SAGE', 'ATLAS'];\nconst VALID_LANGS   = ['es', 'en', 'pt'];\nconst VALID_REASONS = [\n  'intent_detected', 'cotizar_solicitado', 'comparar_solicitado',\n  'agendar_solicitado', 'sage_completo', 'user_request',\n  'escalation', 'return_nova', 'other'\n];\n\nconst errors = [];\n\n// ── CAMPOS REQUERIDOS ──────────────────────────────────────\nif (!input.userId    || isNaN(parseInt(input.userId)))    errors.push('userId es requerido y debe ser numérico');\nif (!input.sessionId || isNaN(parseInt(input.sessionId))) errors.push('sessionId es requerido y debe ser numérico');\nif (!input.fromAgent) errors.push('fromAgent es requerido');\nif (!input.toAgent)   errors.push('toAgent es requerido');\n\n// ── ENUMS ──────────────────────────────────────────────────\nif (input.fromAgent && !VALID_AGENTS.includes(input.fromAgent))\n  errors.push(`fromAgent inválido: \"${input.fromAgent}\". Válidos: ${VALID_AGENTS.join(', ')}`);\nif (input.toAgent && !VALID_AGENTS.includes(input.toAgent))\n  errors.push(`toAgent inválido: \"${input.toAgent}\". Válidos: ${VALID_AGENTS.join(', ')}`);\n\n// ── AUTOHANDOFF — INVÁLIDO ─────────────────────────────────\nif (input.fromAgent && input.toAgent && input.fromAgent === input.toAgent)\n  errors.push(`fromAgent y toAgent no pueden ser iguales (\"${input.fromAgent}\"). Un agente no puede transferirse a sí mismo.`);\n\n// ── SANITIZAR OPCIONALES ──────────────────────────────────\nconst userLanguage = VALID_LANGS.includes(input.userLanguage) ? input.userLanguage : 'es';\nconst reason       = VALID_REASONS.includes(input.reason)     ? input.reason       : 'other';\n\nlet contextSnapshot = {};\nif (input.contextSnapshot) {\n  if (typeof input.contextSnapshot === 'string') {\n    try { contextSnapshot = JSON.parse(input.contextSnapshot); } catch(e) { contextSnapshot = {}; }\n  } else if (typeof input.contextSnapshot === 'object') {\n    contextSnapshot = input.contextSnapshot;\n  }\n}\n\nif (errors.length > 0) {\n  return [{ json: {\n    valid: false, errors,\n    errorCode: 'INVALID_HANDOFF_INPUT',\n    original: input\n  }}];\n}\n\nreturn [{ json: {\n  valid:           true,\n  userId:          parseInt(input.userId),\n  sessionId:       parseInt(input.sessionId),\n  fromAgent:       input.fromAgent,\n  toAgent:         input.toAgent,\n  reason,\n  contextSnapshot,\n  userLanguage,\n  userName:        input.userName || null,\n  _meta: {\n    timestamp:  new Date().toISOString(),\n    handoffKey: `${input.fromAgent}_to_${input.toAgent}`\n  }\n}}];"
+      },
+      "id": "3f3e88de-36e6-4a25-b76b-837ca8d81a18",
+      "name": "🔍 Validar Input de Handoff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1728,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "392301b6-e320-4cbf-bd38-bb3843cd8880",
+      "name": "✅ ¿Input Válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1488,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── FIX v1.0.1 ────────────────────────────────────────────\n// En N8N v1, executeWorkflow pasa el item ACTUAL al sub-workflow.\n// No usa inputData como string — se requiere un Code node previo\n// que forme el payload exacto que 05_db_manager espera.\n// ──────────────────────────────────────────────────────────\nconst v = $('🔍 Validar Input de Handoff').first().json;\n\nreturn [{ json: {\n  operation: 'logHandoff',\n  params: {\n    userId:          v.userId,\n    sessionId:       v.sessionId,\n    fromAgent:       v.fromAgent,\n    toAgent:         v.toAgent,\n    reason:          v.reason,\n    contextSnapshot: v.contextSnapshot\n  }\n}}];"
+      },
+      "id": "d2d91ab3-4a25-47db-9925-f5fd3e855029",
+      "name": "📦 Preparar Payload — logHandoff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "053faf5c-477a-40af-89bc-e0b90081843c",
+      "name": "🗄️ DB — Registrar Handoff",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        -1008,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-log",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dea84d5f-de91-41d6-8704-548b0c7b348c",
+      "name": "✅ ¿Log OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara el payload exacto para updateSession en 05_db_manager.\nconst v = $('🔍 Validar Input de Handoff').first().json;\n\nreturn [{ json: {\n  operation: 'updateSession',\n  params: {\n    sessionId: v.sessionId,\n    agent:     v.toAgent,\n    state:     'handoff_received',\n    context:   v.contextSnapshot\n  }\n}}];"
+      },
+      "id": "78f7b878-4f37-4f4b-949b-5fea01589975",
+      "name": "📦 Preparar Payload — updateSession",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ancJzcIbrd9T9QJB",
+        "options": {}
+      },
+      "id": "0bc9b185-bc41-4e05-ba4e-efcf7dd0cacc",
+      "name": "🗄️ DB — Actualizar Sesión",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-sess",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "17c0cb45-1d92-4fbb-88fa-cf4c9b10c456",
+      "name": "✅ ¿Sesión Actualizada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// WARM TRANSFER MESSAGE GENERATOR v1.0.1\n// Mensajes de transición personalizados en es / en / pt.\n// Variantes aleatorias por par de agentes.\n// ============================================================\n\nconst validated = $('🔍 Validar Input de Handoff').first().json;\nconst { fromAgent, toAgent, userLanguage, userName, reason, contextSnapshot } = validated;\nconst handoffKey = `${fromAgent}_to_${toAgent}`;\nconst firstName  = userName ? userName.split(' ')[0] : null;\nconst greeting   = firstName ? ` ${firstName}` : '';\n\nconst AGENT_PROFILES = {\n  es: {\n    NOVA:  { name: 'NOVA',  emoji: '🌟', role: 'orientadora y gestora de citas' },\n    SAGE:  { name: 'SAGE',  emoji: '🩺', role: 'especialista en cotizaciones médicas' },\n    ATLAS: { name: 'ATLAS', emoji: '🗺️', role: 'consejero de turismo médico' }\n  },\n  en: {\n    NOVA:  { name: 'NOVA',  emoji: '🌟', role: 'scheduling and orientation specialist' },\n    SAGE:  { name: 'SAGE',  emoji: '🩺', role: 'medical quote specialist' },\n    ATLAS: { name: 'ATLAS', emoji: '🗺️', role: 'medical tourism advisor' }\n  },\n  pt: {\n    NOVA:  { name: 'NOVA',  emoji: '🌟', role: 'orientadora e gestora de consultas' },\n    SAGE:  { name: 'SAGE',  emoji: '🩺', role: 'especialista em cotações médicas' },\n    ATLAS: { name: 'ATLAS', emoji: '🗺️', role: 'conselheiro de turismo médico' }\n  }\n};\n\nconst lang      = ['es','en','pt'].includes(userLanguage) ? userLanguage : 'es';\nconst toProfile = AGENT_PROFILES[lang][toAgent];\n\nconst MESSAGES = {\n  es: {\n    NOVA_to_SAGE: [\n      `Perfecto${greeting} 👋 Con gusto te conecto con *${toProfile.name}*, nuestra ${toProfile.role}.\n\n${toProfile.emoji} *${toProfile.name}* ya tiene todo el contexto de nuestra conversación, no necesitas repetir nada.\n\nVamos a preparar tu solicitud de cotización para que los médicos puedan darte precios precisos. ¿Empezamos?`,\n      `Entendido${greeting}. Déjame conectarte con *${toProfile.name}*, quien te acompañará en todo el proceso de cotización ${toProfile.emoji}\n\nNo te preocupes, ya le compartí lo que hablamos. ¡En sus manos estás!`\n    ],\n    NOVA_to_ATLAS: [\n      `Claro${greeting} ${toProfile.emoji} Te presento a *${toProfile.name}*, nuestro ${toProfile.role}.\n\n*${toProfile.name}* analizará tus opciones de destino y calculará el costo real del viaje médico. Ya tiene todo tu contexto. ¿Listo/a para explorar?`\n    ],\n    SAGE_to_ATLAS: [\n      `Excelente${greeting}, tu solicitud está lista ${toProfile.emoji}\n\nAhora te conecto con *${toProfile.name}*, nuestro ${toProfile.role}. Él analizará las cotizaciones que recibas y te ayudará a elegir el destino ideal considerando el costo total real.\n\n*${toProfile.name}*, aquí contigo 🗺️`,\n      `¡Tu expediente está completo${greeting}! Ahora viene la parte emocionante ${toProfile.emoji}\n\n*${toProfile.name}* comparará destinos y calculará cuánto costaría realmente cada opción. ¡Ya tiene todos tus datos!`\n    ],\n    SAGE_to_NOVA: [\n      `Claro${greeting}, te devuelvo con *${toProfile.name}* ${toProfile.emoji}\n\nElla puede ayudarte con lo que necesites ahora. ¡No has perdido ningún progreso!`\n    ],\n    ATLAS_to_NOVA: [\n      `Por supuesto${greeting} 🌟 Te reconecto con *${toProfile.name}*.\n\n*${toProfile.name}*, aquí contigo de nuevo. ¿En qué más puedes ayudar?`\n    ],\n    ATLAS_to_SAGE: [\n      `Entendido${greeting} ${toProfile.emoji} Te regreso con *${toProfile.name}* para ajustar tu solicitud.\n\n¡Ya tiene todo el contexto!`\n    ],\n    default: [\n      `${toProfile.emoji} Te conecto con *${toProfile.name}*, tu ${toProfile.role}.\n\nContexto completo ya transferido. ¿En qué puedo ayudarte?`\n    ]\n  },\n  en: {\n    NOVA_to_SAGE: [\n      `Great${greeting} 👋 Let me connect you with *${toProfile.name}*, our ${toProfile.role}.\n\n${toProfile.emoji} *${toProfile.name}* already has the full context — no need to repeat anything.\n\nWe'll prepare your quote request so doctors can give you accurate pricing. Shall we begin?`\n    ],\n    NOVA_to_ATLAS: [\n      `Of course${greeting} ${toProfile.emoji} Meet *${toProfile.name}*, our ${toProfile.role}.\n\nFull context already transferred. Ready to explore your options?`\n    ],\n    SAGE_to_ATLAS: [\n      `Your request is ready${greeting}! ${toProfile.emoji} Connecting you with *${toProfile.name}*, our ${toProfile.role}.\n\nAll your data is already with him. Let's find your best destination!`\n    ],\n    SAGE_to_NOVA: [\n      `Sure${greeting}, getting *${toProfile.name}* back for you ${toProfile.emoji} No progress lost!`\n    ],\n    ATLAS_to_NOVA: [\n      `Of course${greeting} 🌟 Reconnecting with *${toProfile.name}*. How else can we help?`\n    ],\n    ATLAS_to_SAGE: [\n      `Got it${greeting} ${toProfile.emoji} Sending you back to *${toProfile.name}*. Context is already there!`\n    ],\n    default: [\n      `${toProfile.emoji} Connecting you with *${toProfile.name}*, your ${toProfile.role}.\n\nFull context already transferred.`\n    ]\n  },\n  pt: {\n    NOVA_to_SAGE: [\n      `Perfeito${greeting} 👋 Vou te conectar com *${toProfile.name}*, nossa ${toProfile.role}.\n\n${toProfile.emoji} Contexto completo já transferido — não precisa repetir nada. Vamos começar?`\n    ],\n    SAGE_to_ATLAS: [\n      `Seu pedido está pronto${greeting}! ${toProfile.emoji} Conectando com *${toProfile.name}*.\n\nTodos os seus dados já estão com ele. Vamos encontrar seu destino ideal!`\n    ],\n    SAGE_to_NOVA: [\n      `Claro${greeting}, reconectando com *${toProfile.name}* ${toProfile.emoji} Nenhum progresso perdido!`\n    ],\n    ATLAS_to_NOVA: [\n      `Claro${greeting} 🌟 Reconectando com *${toProfile.name}*. Em que mais podemos ajudar?`\n    ],\n    default: [\n      `${toProfile.emoji} Conectando com *${toProfile.name}*, seu ${toProfile.role}.\n\nContexto completo já transferido!`\n    ]\n  }\n};\n\nconst langMsgs  = MESSAGES[lang] || MESSAGES['es'];\nconst templates = langMsgs[handoffKey] || langMsgs['default'] || MESSAGES['es']['default'];\nconst idx       = Math.floor(Math.random() * templates.length);\n\nconst FIRST_MESSAGES = {\n  es: {\n    SAGE:  '¿Sobre qué procedimiento médico deseas cotizar? Si ya lo mencionaste, solo confirmo para tener todo claro.',\n    ATLAS: '¿Ya tienes cotizaciones de médicos, o aún estás en esa etapa? Cuéntame y vemos el mejor siguiente paso.',\n    NOVA:  '¿En qué más puedo ayudarte hoy?'\n  },\n  en: {\n    SAGE:  'What medical procedure would you like quotes for? Just confirm if you already mentioned it.',\n    ATLAS: 'Do you already have quotes from doctors, or are you still at that stage?',\n    NOVA:  'What else can I help you with today?'\n  },\n  pt: {\n    SAGE:  'Para qual procedimento médico você gostaria de receber orçamentos?',\n    ATLAS: 'Você já tem orçamentos de médicos, ou ainda está nessa etapa?',\n    NOVA:  'Em que mais posso ajudá-lo hoje?'\n  }\n};\n\nreturn [{ json: {\n  success:           true,\n  handoffKey,\n  fromAgent,\n  toAgent,\n  userId:            validated.userId,\n  sessionId:         validated.sessionId,\n  userLanguage:      lang,\n  handoffMessage:    templates[idx],\n  agentFirstMessage: ((FIRST_MESSAGES[lang] || FIRST_MESSAGES['es'])[toAgent]),\n  newActiveAgent:    toAgent,\n  newSessionState:   'handoff_received',\n  _meta: {\n    timestamp:      new Date().toISOString(),\n    reason,\n    dbLogSuccess:   true,\n    sessionUpdated: true,\n    messageVariant: idx\n  }\n}}];"
+      },
+      "id": "f99a6414-ec21-414e-95ab-20de85f6ad15",
+      "name": "💬 Generar Mensaje de Transición",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fallo en log — NO bloqueante. El handoff puede continuar.\nconst validated = $('🔍 Validar Input de Handoff').first().json;\nconst dbError   = $input.first().json;\n\nreturn [{ json: {\n  success: false,\n  error:   'DB_LOG_FAILED',\n  message: 'No se pudo registrar el handoff en la base de datos, pero la operación puede continuar.',\n  details: dbError.message || 'Error desconocido en DB',\n  fromAgent:  validated.fromAgent,\n  toAgent:    validated.toAgent,\n  userId:     validated.userId,\n  sessionId:  validated.sessionId,\n  _meta: { timestamp: new Date().toISOString(), severity: 'warning', blocker: false }\n}}];"
+      },
+      "id": "766a7852-1923-4895-bb62-732fbfb09e1a",
+      "name": "❌ Error — Fallo en Log DB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fallo en actualizar sesión — SÍ bloqueante.\n// Sin esto el orchestrator no sabrá el agente activo.\nconst validated = $('🔍 Validar Input de Handoff').first().json;\nconst dbError   = $input.first().json;\n\nreturn [{ json: {\n  success:  false,\n  error:    'SESSION_UPDATE_FAILED',\n  message:  'No se pudo actualizar la sesión. El handoff fue cancelado para preservar consistencia.',\n  details:  dbError.message || 'Error desconocido en DB',\n  fromAgent:  validated.fromAgent,\n  toAgent:    validated.toAgent,\n  userId:     validated.userId,\n  sessionId:  validated.sessionId,\n  _meta: { timestamp: new Date().toISOString(), severity: 'error', blocker: true }\n}}];"
+      },
+      "id": "c01c910c-0561-4a60-9c35-cb5d14522444",
+      "name": "❌ Error — Fallo en Actualizar Sesión",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{ json: {\n  success:  false,\n  error:    input.errorCode || 'INVALID_INPUT',\n  message:  'El input recibido no pasó la validación del Handoff Manager.',\n  details:  input.errors || [],\n  original: input.original || {},\n  _meta: { timestamp: new Date().toISOString(), severity: 'error', blocker: true }\n}}];"
+      },
+      "id": "9919a3b6-9940-48c5-a82e-003d23d62b10",
+      "name": "❌ Error — Input Inválido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "path": "dec83e2d-c019-4a4f-83af-10313eeaccf0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1968,
+        -144
+      ],
+      "id": "75b243a1-0cce-461a-a8ae-3c068ec9aaae",
+      "name": "Webhook",
+      "webhookId": "dec83e2d-c019-4a4f-83af-10313eeaccf0"
+    }
+  ],
+  "pinData": {
+    "📥 Llamada Entrante": [
+      {
+        "json": {
+          "userId": 1,
+          "sessionId": 1,
+          "fromAgent": "NOVA",
+          "toAgent": "SAGE",
+          "reason": "cotizar_solicitado",
+          "userName": "María",
+          "userLanguage": "es"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "📥 Llamada Entrante": {
+      "main": [
+        [
+          {
+            "node": "🔍 Validar Input de Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Validar Input de Handoff": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Input Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Input Válido?": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar Payload — logHandoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Error — Input Inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Preparar Payload — logHandoff": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Registrar Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Registrar Handoff": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Log OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Log OK?": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar Payload — updateSession",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Error — Fallo en Log DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 Preparar Payload — updateSession": {
+      "main": [
+        [
+          {
+            "node": "🗄️ DB — Actualizar Sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ DB — Actualizar Sesión": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Sesión Actualizada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Sesión Actualizada?": {
+      "main": [
+        [
+          {
+            "node": "💬 Generar Mensaje de Transición",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Error — Fallo en Actualizar Sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e99aeb4d-5382-4fb1-9af7-fcb9a9edf96b",
+  "meta": {
+    "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
+  },
+  "id": "pys8LhPKq50nN8Ae",
+  "tags": []
+}
