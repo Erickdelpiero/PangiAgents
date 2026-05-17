@@ -232,7 +232,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// INTENT ROUTER v2.2.1 — Multilingüe (ES + EN + PT)\n// Fix: saludos rompen continuidad de SAGE/ATLAS para permitir reinicio\n// ============================================================\n\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst normalize   = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();\nconst txtN        = normalize(session.messageText || '');\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── DETECCIÓN DE IDIOMA ──────────────────────────────────────\nconst detectLanguage = (text) => {\n  const t = ' ' + text + ' ';\n  const PT = ['não ','você','obrigad','olá','boa tarde','boa noite','bom dia',' oi ','posso','também','então','cotação','preço','quanto custa','cirurgia','procedimento','viagem','hospedagem','dentista','dente','clareamento','lipoaspiração','mamoplastia','alinhador'];\n  const EN = [\n    ' the ',' is ',' are ',' my ',\n    ' want',' need',' have',' has ',\n    \"i'm \",\"i'd \",\"don't\",\"can't\",\"won't\",\"i'll\",\"i've \",\"i was \",\"i am \",\n    ' what ',' how ',' where ',' does ',\n    'hello','good morning','good afternoon','good evening','good night',\n    'quote','price','surgery','dental work','tooth','teeth',\n    'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation',\n    'breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n    'appointment','schedule','book ','booking','see a doctor','accommodation','lodging'\n  ];\n  if (PT.some(m => t.includes(m))) return 'pt';\n  if (EN.some(m => t.includes(m))) return 'en';\n  return null;\n};\n\n// ── FIX #3 v2.2.1: idioma persistente por sesión ─────────────\n// Si la sesión ya tiene un idioma establecido (guardado por SAGE/ATLAS),\n// se respeta. Solo se re-detecta cuando no hay idioma de sesión previo.\nconst sessionLang    = session.sessionContext?.language || null;\nconst detectedLanguage = sessionLang || detectLanguage(txt) || session.userLanguage || 'es';\nconst out = (extra) => ({ json: { ...session, detectedLanguage, ...extra } });\n\n// SAFETY: SAGE en Q&A activo → siempre continuar, ignorar cualquier otro signal\nconst sageQAStates = ['gathering_profile','procedure_confirmed','questioning','summary','waiting_for_confirmation'];\nconst sageCtxState = session.sessionContext?.sage?.state || '';\nif (activeAgent === 'SAGE' && sageQAStates.includes(sageCtxState) && !isNew) {\n  return [out({ targetAgent: 'SAGE', intentDetected: 'sage_qa_active', pendingHandoff: null })];\n}\n\n// ── KW_SALUDO — definido ANTES de REGLA 1 para poder usarlo ──\nconst KW_SALUDO = [\n  'hola','buenos días','buenas tardes','buenas noches','buenas','inicio','empezar','comenzar','iniciar',\n  'hello','hi ','hey ','good morning','good afternoon','good evening','good night','start','begin',\n  'olá ','oi ','bom dia','boa tarde','boa noite','começar','ajuda','informação','informacao'\n];\nconst hasSaludo = KW_SALUDO.some(kw => txtN.includes(normalize(kw)));\n\n// ── REGLA 1: Respetar agente activo — EXCEPTO saludos ────────\n// Un saludo mientras SAGE/ATLAS está activo indica reinicio de sesión.\n// Sin esta excepción, sesiones técnicamente \"activas\" de días anteriores\n// atrapan al usuario sin poder hablar con NOVA.\nconst hasExplicitAtlas = /^(atlas|comparar?|compare|destinos?|destinations?|quiero comparar|i want to compare|want to compare|quero comparar|ver destinos)$/i.test(txt);\nconst hasExplicitSage  = /^(sage|cotizar|cotar|nueva solicitud|new request|nova cotacao)$/i.test(txt);\nif (activeAgent === 'SAGE'  && !isNew && !hasSaludo && !hasExplicitAtlas) return [out({ targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null })];\nif (activeAgent === 'ATLAS' && !isNew && !hasSaludo && !hasExplicitSage)  return [out({ targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null })];\n\n// ── REGLA 2: Botones interactivos ────────────────────────────\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt.includes('quote')    || txt.includes('cotar'))    return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  })];\n  if (txt.includes('comparar') || txt.includes('compare') || txt.includes('comparar')) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' })];\n  if (txt.includes('agendar')  || txt.includes('schedule') || txt.includes('agendar')) return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   })];\n  return [out({ targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null })];\n}\n\n// ── REGLA 3: Keywords trilingüe ──────────────────────────────\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela',\n'carie','caries','dolor de muela','dolor dental','me duele','empaste',\n'relleno','funda','corona','sarro','encia','encías','sangrado',\n'nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'quote','how much','price','rate','fee',\n  'tooth','teeth','implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'procedure','surgery','treatment','dental work','dental procedure',\n  'cotação','preço','quanto custa','quanto é','valor do',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','abdominoplastia','mamoplastia','aumento de seios','redução mamária','bichectomia','blefaroplastia','lifting facial',\n  'procedimento','cirurgia','dentista','dente','molar','tratamento dental'\n];\nconst KW_COMPARAR = [\n  'compar','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena','perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami','cancún','cancun','ciudad de mexico','santo domingo',\n  'compare','comparison','destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'comparar','comparação','viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','disponibilidad','horario','me atiendan','consulta',\n  'appointment','schedule','book ','booking','see a doctor','availability','available','make an appointment','want to see',\n  'marcar consulta','marcar uma','reservar consulta','disponibilidade','atendimento','quero consulta'\n];\n\nconst hasCotizar  = KW_COTIZAR.some(kw  => txtN.includes(normalize(kw)));\nconst hasComparar = KW_COMPARAR.some(kw => txtN.includes(normalize(kw)));\nconst hasAgendar  = KW_AGENDAR.some(kw  => txtN.includes(normalize(kw)));\n\nif (hasCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_keyword',  pendingHandoff: 'SAGE'  })];\nif (hasComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_keyword', pendingHandoff: 'ATLAS' })];\nif (hasAgendar)  return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_keyword',  pendingHandoff: null   })];\nif (hasSaludo)   return [out({ targetAgent: 'NOVA', intentDetected: 'saludo',           pendingHandoff: null   })];\n\nreturn [out({ targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null })];"
+        "jsCode": "// ============================================================\n// INTENT ROUTER v2.2.1 — Multilingüe (ES + EN + PT)\n// Fix: saludos rompen continuidad de SAGE/ATLAS para permitir reinicio\n// ============================================================\n\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst normalize   = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();\nconst txtN        = normalize(session.messageText || '');\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── DETECCIÓN DE IDIOMA ──────────────────────────────────────\nconst detectLanguage = (text) => {\n  const t = ' ' + text + ' ';\n  const PT = ['não ','você','obrigad','olá','boa tarde','boa noite','bom dia',' oi ','posso','também','então','cotação','preço','quanto custa','cirurgia','procedimento','viagem','hospedagem','dentista','dente','clareamento','lipoaspiração','mamoplastia','alinhador'];\n  const EN = [\n    ' the ',' is ',' are ',' my ',\n    ' want',' need',' have',' has ',\n    \"i'm \",\"i'd \",\"don't\",\"can't\",\"won't\",\"i'll\",\"i've \",\"i was \",\"i am \",\n    ' what ',' how ',' where ',' does ',\n    'hello','good morning','good afternoon','good evening','good night',\n    'quote','price','surgery','dental work','tooth','teeth',\n    'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation',\n    'breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n    'appointment','schedule','book ','booking','see a doctor','accommodation','lodging'\n  ];\n  if (PT.some(m => t.includes(m))) return 'pt';\n  if (EN.some(m => t.includes(m))) return 'en';\n  return null;\n};\n\n// ── FIX #3 v2.2.1: idioma persistente por sesión ─────────────\n// Si la sesión ya tiene un idioma establecido (guardado por SAGE/ATLAS),\n// se respeta. Solo se re-detecta cuando no hay idioma de sesión previo.\nconst sessionLang    = session.sessionContext?.language || null;\nconst detectedLanguage = sessionLang || detectLanguage(txt) || session.userLanguage || 'es';\nconst out = (extra) => ({ json: { ...session, detectedLanguage, ...extra } });\n// ── CONSENT CHECK ─────────────────────────────────────────────\nconst ctx = session.sessionContext || {};\nif (!ctx.consent_given) {\n  if (ctx.awaiting_consent) {\n    const hasExplicitYes = /\\b(s[ií]|si$|yes|sim|ok\\b|dale|claro|acepto|continuar|continue|adelante|de acuerdo|confirmo|por supuesto|sure|aceito|concordo|accept|agree)\\b/i.test(txt.trim());\n    const hasExplicitNo  = (\n      /^no[\\s,\\.!¡¿]/i.test(txt.trim()) ||\n      /\\b(no acepto|no quiero|no deseo|no autorizo|rechazo|refuse|reject|decline|deny|não aceito|nao aceito)\\b/i.test(txt)\n    ) && !hasExplicitYes;\n    \n    if (hasExplicitNo) {\n      return [out({ targetAgent: 'CONSENT_REFUSED', intentDetected: 'consent_refused', pendingHandoff: null })];\n    }\n    return [out({ targetAgent: 'CONSENT_ACCEPTED', intentDetected: 'consent_accepted', pendingHandoff: null })];\n  }\n  return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent', pendingHandoff: null })];\n}\n\n// SAFETY: SAGE en Q&A activo → siempre continuar, ignorar cualquier otro signal\nconst sageQAStates = ['gathering_profile','procedure_confirmed','questioning','summary','waiting_for_confirmation'];\nconst sageCtxState = session.sessionContext?.sage?.state || '';\nif (activeAgent === 'SAGE' && sageQAStates.includes(sageCtxState) && !isNew) {\n  return [out({ targetAgent: 'SAGE', intentDetected: 'sage_qa_active', pendingHandoff: null })];\n}\n\n// ── KW_SALUDO — definido ANTES de REGLA 1 para poder usarlo ──\nconst KW_SALUDO = [\n  'hola','buenos días','buenas tardes','buenas noches','buenas','inicio','empezar','comenzar','iniciar',\n  'hello','hi ','hey ','good morning','good afternoon','good evening','good night','start','begin',\n  'olá ','oi ','bom dia','boa tarde','boa noite','começar','ajuda','informação','informacao'\n];\nconst hasSaludo = KW_SALUDO.some(kw => txtN.includes(normalize(kw)));\n\n// ── REGLA 1: Respetar agente activo — EXCEPTO saludos ────────\n// Un saludo mientras SAGE/ATLAS está activo indica reinicio de sesión.\n// Sin esta excepción, sesiones técnicamente \"activas\" de días anteriores\n// atrapan al usuario sin poder hablar con NOVA.\nconst hasExplicitAtlas = /^(atlas|comparar?|compare|destinos?|destinations?|quiero comparar|i want to compare|want to compare|quero comparar|ver destinos)$/i.test(txt);\nconst hasExplicitSage  = /^(sage|cotizar|cotar|nueva solicitud|new request|nova cotacao)$/i.test(txt);\nif (activeAgent === 'SAGE'  && !isNew && !hasSaludo && !hasExplicitAtlas) return [out({ targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null })];\nif (activeAgent === 'ATLAS' && !isNew && !hasSaludo && !hasExplicitSage)  return [out({ targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null })];\n\n// ── REGLA 2: Botones interactivos ────────────────────────────\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt.includes('quote')    || txt.includes('cotar'))    return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  })];\n  if (txt.includes('comparar') || txt.includes('compare') || txt.includes('comparar')) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' })];\n  if (txt.includes('agendar')  || txt.includes('schedule') || txt.includes('agendar')) return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   })];\n  return [out({ targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null })];\n}\n\n// ── REGLA 3: Keywords trilingüe ──────────────────────────────\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela',\n'carie','caries','dolor de muela','dolor dental','me duele','empaste',\n'relleno','funda','corona','sarro','encia','encías','sangrado',\n'nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'quote','how much','price','rate','fee',\n  'tooth','teeth','implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'procedure','surgery','treatment','dental work','dental procedure',\n  'cotação','preço','quanto custa','quanto é','valor do',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','abdominoplastia','mamoplastia','aumento de seios','redução mamária','bichectomia','blefaroplastia','lifting facial',\n  'procedimento','cirurgia','dentista','dente','molar','tratamento dental'\n];\nconst KW_COMPARAR = [\n  'compar','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena','perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami','cancún','cancun','ciudad de mexico','santo domingo',\n  'compare','comparison','destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'comparar','comparação','viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','disponibilidad','horario','me atiendan','consulta',\n  'appointment','schedule','book ','booking','see a doctor','availability','available','make an appointment','want to see',\n  'marcar consulta','marcar uma','reservar consulta','disponibilidade','atendimento','quero consulta'\n];\n\nconst hasCotizar  = KW_COTIZAR.some(kw  => txtN.includes(normalize(kw)));\nconst hasComparar = KW_COMPARAR.some(kw => txtN.includes(normalize(kw)));\nconst hasAgendar  = KW_AGENDAR.some(kw  => txtN.includes(normalize(kw)));\n\nif (hasCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_keyword',  pendingHandoff: 'SAGE'  })];\nif (hasComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_keyword', pendingHandoff: 'ATLAS' })];\nif (hasAgendar)  return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_keyword',  pendingHandoff: null   })];\nif (hasSaludo)   return [out({ targetAgent: 'NOVA', intentDetected: 'saludo',           pendingHandoff: null   })];\n\nreturn [out({ targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null })];"
       },
       "id": "ecabd83f-fa86-4cd9-b0cc-a430722628c8",
       "name": "🧠 Router de Intención y Agente",
@@ -312,6 +312,75 @@
                 ],
                 "combinator": "and"
               }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "2c8933fc-48db-4e70-95be-b062279e29fb",
+                    "leftValue": "={{ $json.targetAgent }}",
+                    "rightValue": "CONSENT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "ee4b6b2c-9742-434e-a4a7-ef9378c3fba2",
+                    "leftValue": "={{ $json.targetAgent }}",
+                    "rightValue": "CONSENT_REFUSED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "50082eb0-144e-4cf2-9d1b-00f4ee5d8a72",
+                    "leftValue": "={{ $json.targetAgent }}",
+                    "rightValue": "CONSENT_ACCEPTED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
             }
           ]
         },
@@ -322,8 +391,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        -2656,
-        432
+        -2672,
+        544
       ]
     },
     {
@@ -335,8 +404,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1600,
-        448
+        -1552,
+        112
       ]
     },
     {
@@ -358,8 +427,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        -1360,
-        448
+        -1312,
+        112
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -378,8 +447,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1120,
-        448
+        -1072,
+        112
       ]
     },
     {
@@ -392,8 +461,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1584,
-        736
+        -1536,
+        400
       ]
     },
     {
@@ -405,8 +474,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1344,
-        736
+        -1296,
+        400
       ]
     },
     {
@@ -419,8 +488,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1104,
-        736
+        -1056,
+        400
       ]
     },
     {
@@ -458,8 +527,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -2144,
-        448
+        -2320,
+        304
       ],
       "id": "dcac3db9-b7b7-48bf-9111-dc80bf42adb7",
       "name": "Call '02_sage'"
@@ -486,8 +555,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -2144,
-        256
+        -2320,
+        112
       ],
       "id": "97c83672-08c7-43ca-9ea4-b239f64be737",
       "name": "Call '01_nova'"
@@ -514,8 +583,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -2144,
-        656
+        -2320,
+        512
       ],
       "id": "95327116-bee7-4d41-a1bf-85be12ba911e",
       "name": "Call '03_atlas'"
@@ -549,7 +618,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -3312,
+        -3344,
         336
       ]
     },
@@ -623,9 +692,48 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2400,
-        112
+        -2928,
+        384
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// 📋 Aviso de Privacidad v2.0\n// Solo envía el aviso. NO acepta consentimiento aún.\n// Guarda awaiting_consent: true para que el router\n// maneje la respuesta del usuario en el siguiente mensaje.\n// ============================================================\nconst inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\n\nconst NOTICE = {\n  es: `📋 *Aviso de Privacidad*\\n\\nAl usar este servicio aceptas que Pangi procese tu información de salud con fines de orientación médica. Tus datos se almacenan de forma segura y no se comparten con terceros sin tu autorización.\\n\\n_Más información en pangi.com/privacidad_\\n\\n*¿Aceptas continuar?* Responde *sí* para continuar o *no* para cancelar.`,\n  en: `📋 *Privacy Notice*\\n\\nBy using this service you agree that Pangi may process your health information for medical guidance purposes. Your data is securely stored and not shared with third parties without your authorization.\\n\\n_More info at pangi.com/privacy_\\n\\n*Do you accept to continue?* Reply *yes* to continue or *no* to cancel.`,\n  pt: `📋 *Aviso de Privacidade*\\n\\nAo usar este serviço você concorda que o Pangi processe suas informações de saúde para fins de orientação médica. Seus dados são armazenados com segurança e não são compartilhados com terceiros sem sua autorização.\\n\\n_Mais informações em pangi.com/privacidade_\\n\\n*Você aceita continuar?* Responda *sim* para continuar ou *não* para cancelar.`\n};\n\nconst lang = LANG in NOTICE ? LANG : 'es';\n\nreturn [{ json: {\n  responseText:      NOTICE[lang],\n  newActiveAgent:    inp.activeAgent || 'NOVA',\n  newSessionState:   'awaiting_consent',\n  newSessionContext: {\n    ...ctx,\n    awaiting_consent: true,\n    consent_given:    false,\n    language:         lang\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        720
+      ],
+      "id": "db922135-6f97-4746-869c-8faf6f9ae272",
+      "name": "📋 Aviso de Privacidad + Bienvenida"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\nconst fn   = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm   = fn ? ` ${fn}` : '';\n\nconst WELCOME = {\n  es: `✅ *Gracias por aceptar${nm}.*\\n\\n👋 Soy *NOVA*, tu asistente de salud en Pangi.\\n\\n¿En qué puedo ayudarte hoy?\\n\\n💰 Escribe *cotizar* — Recibe precios precisos de médicos\\n🗺️ Escribe *comparar* — Analiza el costo total de tu viaje médico\\n🗓️ Escribe *agendar* — Busca médicos y reserva citas`,\n  en: `✅ *Thank you for accepting${nm}.*\\n\\n👋 I'm *NOVA*, your Pangi health assistant.\\n\\nHow can I help you today?\\n\\n💰 Type *quote* — Get precise pricing from doctors\\n🗺️ Type *compare* — Analyze your full medical trip cost\\n🗓️ Type *schedule* — Find doctors and book appointments`,\n  pt: `✅ *Obrigado por aceitar${nm}.*\\n\\n👋 Sou *NOVA*, sua assistente de saúde do Pangi.\\n\\nComo posso te ajudar hoje?\\n\\n💰 Escreva *cotizar* — Receba preços precisos de médicos\\n🗺️ Escreva *comparar* — Analise o custo total da sua viagem médica\\n🗓️ Escreva *agendar* — Encontre médicos e reserve consultas`\n};\n\nconst lang = LANG in WELCOME ? LANG : 'es';\n\nreturn [{ json: {\n  responseText:      WELCOME[lang],\n  newActiveAgent:    'NOVA',\n  newSessionState:   'initial_presented',\n  newSessionContext: {\n    ...ctx,\n    consent_given:    true,\n    awaiting_consent: false,\n    language:         lang,\n    nova: { state: 'initial_presented' }\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        1104
+      ],
+      "id": "f5b8f805-f9d1-44bb-bbca-58ae6fa64a54",
+      "name": "📋 Bienvenida Post-Consentimiento"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\n\nconst GOODBYE = {\n  es: `Entendemos tu decisión. Sin aceptar el aviso de privacidad no es posible usar los servicios de Pangi.\\n\\nSi cambias de opinión en el futuro, puedes escribirnos nuevamente. ¡Hasta pronto! 👋`,\n  en: `We understand your decision. Without accepting the privacy notice, we cannot provide Pangi's services.\\n\\nIf you change your mind in the future, feel free to message us again. Goodbye! 👋`,\n  pt: `Entendemos sua decisão. Sem aceitar o aviso de privacidade, não é possível usar os serviços do Pangi.\\n\\nSe mudar de ideia no futuro, pode nos escrever novamente. Até logo! 👋`\n};\n\nconst lang = LANG in GOODBYE ? LANG : 'es';\n\nreturn [{ json: {\n  responseText:      GOODBYE[lang],\n  newActiveAgent:    'NOVA',\n  newSessionState:   'consent_refused',\n  newSessionContext: {\n    ...ctx,\n    awaiting_consent: false,\n    consent_given:    false\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        928
+      ],
+      "id": "8ce24088-49fa-4dd6-92fa-eed7f00b7a2c",
+      "name": "📋 Rechazo de Consentimiento"
     }
   ],
   "pinData": {
@@ -638,7 +746,7 @@
             "x-real-ip": "157.173.96.16",
             "x-forwarded-for": "157.173.96.16",
             "x-forwarded-proto": "https",
-            "content-length": "1713",
+            "content-length": "1685",
             "accept": "application/json, text/plain, */*",
             "content-type": "application/json",
             "user-agent": "axios/1.12.2",
@@ -654,11 +762,11 @@
                 "remoteJid": "166821009338534@lid",
                 "remoteJidAlt": "51941915097@s.whatsapp.net",
                 "fromMe": false,
-                "id": "3EB068689B0226C3391A68",
+                "id": "3EB084E5EA0102BD757272",
                 "participant": "",
                 "addressingMode": "lid"
               },
-              "pushName": "Erick Del Piero",
+              "pushName": "Erick Del Piero ⚡",
               "status": "DELIVERY_ACK",
               "message": {
                 "messageContextInfo": {
@@ -666,89 +774,85 @@
                     "senderKeyIndexes": [],
                     "recipientKeyIndexes": [],
                     "senderKeyHash": {
-                      "0": 245,
-                      "1": 206,
-                      "2": 8,
-                      "3": 54,
-                      "4": 206,
-                      "5": 165,
-                      "6": 15,
-                      "7": 44,
-                      "8": 204,
-                      "9": 152
+                      "0": 239,
+                      "1": 214,
+                      "2": 33,
+                      "3": 226,
+                      "4": 205,
+                      "5": 71,
+                      "6": 122,
+                      "7": 241,
+                      "8": 109,
+                      "9": 188
                     },
                     "senderTimestamp": {
-                      "low": 1772896390,
+                      "low": 1778561547,
                       "high": 0,
                       "unsigned": true
                     },
                     "senderAccountType": 0,
                     "receiverAccountType": 0,
                     "recipientKeyHash": {
-                      "0": 128,
-                      "1": 75,
-                      "2": 193,
-                      "3": 202,
-                      "4": 159,
-                      "5": 255,
-                      "6": 86,
-                      "7": 65,
-                      "8": 190,
-                      "9": 169
+                      "0": 138,
+                      "1": 64,
+                      "2": 161,
+                      "3": 23,
+                      "4": 207,
+                      "5": 192,
+                      "6": 215,
+                      "7": 109,
+                      "8": 67,
+                      "9": 28
                     },
                     "recipientTimestamp": {
-                      "low": 1772237358,
+                      "low": 1778595155,
                       "high": 0,
                       "unsigned": true
                     }
                   },
                   "deviceListMetadataVersion": 2,
                   "messageSecret": {
-                    "0": 133,
-                    "1": 253,
-                    "2": 146,
-                    "3": 100,
-                    "4": 253,
-                    "5": 161,
-                    "6": 148,
-                    "7": 217,
-                    "8": 205,
-                    "9": 146,
-                    "10": 76,
-                    "11": 140,
-                    "12": 185,
-                    "13": 223,
-                    "14": 147,
-                    "15": 144,
-                    "16": 113,
-                    "17": 198,
-                    "18": 2,
-                    "19": 221,
-                    "20": 98,
-                    "21": 18,
-                    "22": 221,
-                    "23": 191,
-                    "24": 55,
-                    "25": 178,
-                    "26": 143,
-                    "27": 132,
-                    "28": 177,
-                    "29": 215,
-                    "30": 45,
-                    "31": 170
-                  },
-                  "limitSharingV2": {
-                    "trigger": 0,
-                    "initiatedByMe": false
+                    "0": 20,
+                    "1": 102,
+                    "2": 236,
+                    "3": 16,
+                    "4": 143,
+                    "5": 93,
+                    "6": 250,
+                    "7": 202,
+                    "8": 8,
+                    "9": 171,
+                    "10": 17,
+                    "11": 245,
+                    "12": 77,
+                    "13": 208,
+                    "14": 127,
+                    "15": 182,
+                    "16": 164,
+                    "17": 74,
+                    "18": 19,
+                    "19": 72,
+                    "20": 216,
+                    "21": 211,
+                    "22": 35,
+                    "23": 175,
+                    "24": 226,
+                    "25": 197,
+                    "26": 160,
+                    "27": 179,
+                    "28": 85,
+                    "29": 8,
+                    "30": 38,
+                    "31": 161
                   }
                 },
-                "conversation": "dental"
+                "conversation": "No, no acepto el uso de mis datos"
               },
               "contextInfo": {
                 "mentionedJid": [],
                 "groupMentions": [],
                 "ephemeralSettingTimestamp": {
-                  "low": 1773444304,
+                  "low": 1778879963,
                   "high": 0,
                   "unsigned": false
                 },
@@ -759,12 +863,12 @@
                 }
               },
               "messageType": "conversation",
-              "messageTimestamp": 1773692542,
+              "messageTimestamp": 1779052776,
               "instanceId": "ab9cec16-fcbe-40af-a91a-56eb998bac03",
               "source": "web"
             },
             "destination": "https://n8n.coopelmilagro.com/webhook/pangi-whatsapp-dev",
-            "date_time": "2026-03-16T15:22:22.645Z",
+            "date_time": "2026-05-17T16:19:36.580Z",
             "sender": "51955298245@s.whatsapp.net",
             "server_url": "https://evolution.coopelmilagro.com",
             "apikey": "[REVOKED_EVOLUTION_API_KEY]"
@@ -977,6 +1081,27 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "📋 Aviso de Privacidad + Bienvenida",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📋 Rechazo de Consentimiento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📋 Bienvenida Post-Consentimiento",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1118,13 +1243,46 @@
           }
         ]
       ]
+    },
+    "📋 Aviso de Privacidad + Bienvenida": {
+      "main": [
+        [
+          {
+            "node": "📤 Preparar Envío WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Rechazo de Consentimiento": {
+      "main": [
+        [
+          {
+            "node": "📤 Preparar Envío WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Bienvenida Post-Consentimiento": {
+      "main": [
+        [
+          {
+            "node": "📤 Preparar Envío WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "25f1935f-3d99-40d2-929b-2031bbebedca",
+  "versionId": "8a866a2f-ec51-4579-bbbf-4c1b7bcdb557",
   "meta": {
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
   },
