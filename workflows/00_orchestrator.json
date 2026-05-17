@@ -12,8 +12,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        -4400,
-        112
+        -3568,
+        -336
       ],
       "webhookId": "70e718c1-ffd3-4777-ba7a-7132acb14d21"
     },
@@ -26,8 +26,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -4160,
-        112
+        -3328,
+        -336
       ]
     },
     {
@@ -58,8 +58,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -3920,
-        112
+        -3088,
+        -336
       ]
     },
     {
@@ -71,8 +71,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3680,
-        0
+        -2848,
+        -448
       ]
     },
     {
@@ -85,8 +85,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -3440,
-        0
+        -2608,
+        -448
       ]
     },
     {
@@ -98,8 +98,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3200,
-        0
+        -2368,
+        -448
       ]
     },
     {
@@ -112,8 +112,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -2960,
-        0
+        -2528,
+        -128
       ]
     },
     {
@@ -146,8 +146,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -2720,
-        0
+        -2288,
+        -128
       ]
     },
     {
@@ -159,8 +159,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2480,
-        -96
+        -1824,
+        -432
       ]
     },
     {
@@ -172,8 +172,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2480,
-        112
+        -2032,
+        -112
       ]
     },
     {
@@ -186,8 +186,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -2240,
-        112
+        -1792,
+        -112
       ]
     },
     {
@@ -199,8 +199,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2000,
-        112
+        -1552,
+        -112
       ]
     },
     {
@@ -212,8 +212,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1760,
-        0
+        -1248,
+        -112
       ]
     },
     {
@@ -226,8 +226,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1520,
-        0
+        -1008,
+        -112
       ]
     },
     {
@@ -239,8 +239,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1280,
-        0
+        -3552,
+        336
       ]
     },
     {
@@ -322,8 +322,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        384,
-        0
+        -2656,
+        432
       ]
     },
     {
@@ -335,8 +335,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1136,
-        16
+        -1600,
+        448
       ]
     },
     {
@@ -358,8 +358,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1376,
-        16
+        -1360,
+        448
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -378,8 +378,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1616,
-        16
+        -1120,
+        448
       ]
     },
     {
@@ -392,8 +392,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1856,
-        16
+        -1584,
+        736
       ]
     },
     {
@@ -405,8 +405,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2096,
-        16
+        -1344,
+        736
       ]
     },
     {
@@ -419,8 +419,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        2336,
-        16
+        -1104,
+        736
       ]
     },
     {
@@ -432,8 +432,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3680,
-        272
+        -2848,
+        -176
       ]
     },
     {
@@ -458,8 +458,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        784,
-        16
+        -2144,
+        448
       ],
       "id": "dcac3db9-b7b7-48bf-9111-dc80bf42adb7",
       "name": "Call '02_sage'"
@@ -486,8 +486,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        784,
-        -176
+        -2144,
+        256
       ],
       "id": "97c83672-08c7-43ca-9ea4-b239f64be737",
       "name": "Call '01_nova'"
@@ -514,8 +514,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        784,
-        224
+        -2144,
+        656
       ],
       "id": "95327116-bee7-4d41-a1bf-85be12ba911e",
       "name": "Call '03_atlas'"
@@ -549,8 +549,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -976,
-        0
+        -3312,
+        336
       ]
     },
     {
@@ -562,14 +562,14 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -640,
-        -224
+        -2912,
+        112
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
+        "url": "http://127.0.0.1:4000/v1/messages",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "anthropicApi",
         "sendHeaders": true,
@@ -598,8 +598,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        -336,
-        -224
+        -2656,
+        112
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -623,8 +623,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        16,
-        -224
+        -2400,
+        112
       ]
     }
   ],
@@ -1120,11 +1120,11 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "385199f4-789f-4a10-a374-48548766b207",
+  "versionId": "25f1935f-3d99-40d2-929b-2031bbebedca",
   "meta": {
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
   },

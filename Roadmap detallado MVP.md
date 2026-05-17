@@ -1,104 +1,86 @@
-## Roadmap detallado — MVP GONEX
+# Roadmap detallado — MVP GONEX
 
 ---
 
-### PASO 1 — Cerrar los 4 issues de V2
+### PASO 1 — Cerrar los 4 issues de V2 ✅ COMPLETADO
 **Objetivo:** conversaciones que se sienten naturales, no predefinidas.
 
-**Qué se resuelve:**
+**Qué se resolvió:**
 
-*Issue 1 — SAGE acepta cualquier texto como respuesta válida.* Claude Sonnet debe validar coherencia semántica antes de guardar el dato. Si el usuario escribe "hola" cuando SAGE pregunta cuántos implantes necesita, Claude detecta la incoherencia y repregunta con contexto. Se implementa como una validación dentro del motor de SAGE antes del `updateSession`.
+*Issue 1 — Coherencia SAGE.* Implementado rollback en `🔧 Procesar — NLG SAGE`: cuando `isCoherent=false` y no hay escape intent, revierte `collected_data` y decrementa `current_q_index`. Claude repregunta en lugar de avanzar con dato inválido.
 
-*Issue 2 — Cambio de procedimiento mid-Q&A.* Cuando `escapeIntent` es true dentro del estado `questioning`, el state machine debe limpiar `collected_data`, resetear `current_q_index` a 0 y reiniciar desde `procedure_confirmed` con el nuevo procedimiento. Actualmente el escape sale del flujo pero no limpia el estado correctamente.
+*Issue 2 — Cambio de procedimiento mid-Q&A.* Bloques `change_procedure` y `abort` en Procesar NLG SAGE. Resetea `sage.state='procedure_confirmed'`, `collected_data={}`, `current_q_index=1`. El flujo reinicia limpio desde la confirmación del nuevo procedimiento.
 
-*Issue 3 — Idioma por sesión, no por mensaje.* El idioma se fija en `sessions.context.language` en el primer mensaje y se inyecta como override en todos los system prompts de Claude. Si `context.language` ya existe, no se detecta de nuevo. Aplica a los tres agentes y al orchestrator.
+*Issue 3 — Idioma por sesión.* Fix en `🔧 Normalizar — Sesión Existente` del orquestador: `userLanguage: sessionContext.language || userData.language || 'es'`. Fix adicional en `🔧 Merge Handoff Result` de NOVA para propagar el idioma al contexto de sesión.
 
-*Issue 4 — ATLAS sin cotizaciones.* Cuando `atlas.quotes` está vacío o no existe, Claude genera una respuesta que orienta al usuario hacia SAGE primero, en lugar de mostrar un análisis vacío o un mensaje de error. Se maneja en el system prompt de ATLAS con una instrucción explícita para este caso.
+*Issue 4 — ATLAS sin cotizaciones.* `procType` ya no usa `'dental'` como fallback hardcodeado — usa `''`. `recoveryField` usa `plastic_surgery` como único condicional explícito, con dental como default. Claude recibe contexto genérico cuando no hay procedimiento definido.
 
-**Archivos necesarios:** `02_sage.json`, `03_atlas.json`, `00_orchestrator.json` — los compartes al iniciar este paso.
-
-**Entregable:** tres workflows actualizados listos para importar. Conversaciones naturales sin los 4 problemas identificados.
-
-**Estimado:** 1-2 sesiones de trabajo.
+**Archivos modificados:** `02_sage.json`, `03_atlas.json`, `00_orchestrator.json`, `01_nova.json`
 
 ---
 
-### PASO 2 — Capa de de-identificación PHI
+### PASO 2 — Capa de de-identificación PHI ✅ COMPLETADO
 **Objetivo:** Claude nunca recibe identificadores personales del paciente.
 
-**Qué se construye:** una función `stripPHI()` que se ejecuta como nodo Code en cada agente, entre el paso de "leer sesión" y el paso de "llamar a Claude". La función extrae del contexto de sesión únicamente los datos clínicos que Claude necesita para hacer su trabajo, descartando `user_phone`, `user_name`, y cualquier referencia directa al usuario. La respuesta de Claude se recibe limpia y se re-integra al contexto completo.
+**Qué se construyó:** Nodo Code dedicado `🔐 Strip PHI` en cada agente (SAGE, ATLAS, NOVA), insertado entre el Motor y el NLG Preparar. El nodo preserva todos los datos en el payload principal (`...inp`) para que los nodos downstream (WhatsApp, DB) funcionen normalmente. Agrega `_phi_clean` con solo datos clínicos y `phi_stripped: true` como flag de auditoría.
 
-El `05_db_manager` también recibe un ajuste: cuando prepara el payload para pasar al agente, incluye un campo `phi_stripped: true` que sirve como flag de auditoría para Langfuse en el paso siguiente.
+Los nodos NLG Preparar usan `raw._phi_clean || raw` para construir los prompts de Claude. Los returns de todos los nodos usan `...raw` (no `...motor`) para preservar `remoteJid` y `userName` en el flujo hacia `📤 Construir Respuesta Final`.
 
-**Archivos necesarios:** ninguno previo. Te comparto los nodos Code nuevos para insertar en cada workflow.
+Todos los prompts exportados a `/prompts/` como fuente de verdad documentada.
 
-**Entregable:** los tres agentes actualizados con la capa PHI activa. Verificable directamente en los logs de Claude API — los payloads ya no contienen datos del usuario.
-
-**Estimado:** 1 sesión.
+**Archivos modificados:** `01_nova.json`, `02_sage.json`, `03_atlas.json`
 
 ---
 
-### PASO 3 — LiteLLM como proxy de modelos
+### PASO 3 — LiteLLM como proxy de modelos ✅ COMPLETADO
 **Objetivo:** el sistema es model-agnostic desde hoy.
 
-**Qué se construye:** LiteLLM se instala en Docker en GONEX con un `docker-compose.yml` mínimo. Se configura con Claude Sonnet y Haiku como modelos por defecto. Los 4 nodos HTTP que actualmente apuntan a `api.anthropic.com` se redirigen a `http://localhost:4000`, que es donde corre LiteLLM. La API key de Anthropic se mueve del nodo N8N al archivo de configuración de LiteLLM.
+**Qué se construyó:** LiteLLM 1.84.0 instalado de forma **nativa** (no Docker) en el VPS actual usando Python 3.12 venv, bajo usuario dedicado `litellm_user`, corriendo como servicio systemd en `127.0.0.1:4000`.
 
-El resultado funcional: el sistema opera exactamente igual. El resultado estratégico: para probar GPT-4o o Gemini en SAGE se cambia una línea en la config de LiteLLM, sin tocar ningún workflow.
+> **Nota de diferencia vs plan original:** el roadmap contemplaba Docker en GONEX. Dado que aún operamos en el VPS de Cooperativa El Milagro, se instaló nativo para consistencia con el entorno actual. Al migrar a GONEX, LiteLLM correrá en Docker (ver sección LiteLLM en `02_migration_gonex.md`).
 
-Como bonus, LiteLLM expone métricas nativas de uso y costo por modelo que se integran fácilmente con Langfuse en el paso siguiente.
+Los 4 nodos HTTP de N8N (`☁️ Claude NLU — Haiku`, `☁️ Claude NLG — NOVA Haiku`, `☁️ Claude NLG — SAGE Sonnet`, `☁️ Claude NLG — ATLAS Sonnet`) redirigidos de `https://api.anthropic.com/v1/messages` a `http://127.0.0.1:4000/v1/messages`. La API key de Anthropic vive solo en `/var/www/litellm/.env`.
 
-**Archivos necesarios:** ninguno de tu parte. Te entrego el `docker-compose.yml` y las instrucciones de instalación en GONEX.
+Se agregaron nodos IF `✅ ¿NLG Activo?` en los 3 agentes para evitar llamadas a LiteLLM cuando `_nlgSkip: true`, eliminando errores 400 por payloads vacíos.
 
-**Entregable:** LiteLLM corriendo en GONEX, 4 nodos N8N actualizados, verificación de que una conversación completa funciona a través del proxy.
-
-**Estimado:** 1 sesión.
+**Archivos modificados:** `01_nova.json`, `02_sage.json`, `03_atlas.json`  
+**Archivos VPS creados:** `/var/www/litellm/config.yaml`, `/var/www/litellm/.env`, `/etc/systemd/system/litellm.service`
 
 ---
 
-### PASO 4 — Langfuse para observabilidad
+### PASO 4 — Langfuse para observabilidad ✅ COMPLETADO
 **Objetivo:** visibilidad completa de cada decisión del sistema. Dashboard funcional para mostrar a el CEO de Pangi.
 
-**Qué se construye:** se crea una cuenta en Langfuse Cloud (gratuita, sin infraestructura). Se agregan cuatro nodos HTTP en N8N, uno por cada llamada Claude, que envían un trace a Langfuse con: `session_id`, `agent_name`, `state`, `language`, `tokens_used`, `latency_ms`, y `cost_usd`. El `phi_stripped: true` del paso anterior va como metadata de auditoría.
+**Qué se construyó:** Cuenta Langfuse Cloud en región US (`us.cloud.langfuse.com`), proyecto `pangi-dev`. En cada agente se agregó una rama paralela desde el nodo Claude HTTP: nodo Code `📊 Langfuse — [AGENTE]` + nodo HTTP `📤 Langfuse — Enviar ([AGENTE])`. Solo se traza cuando Claude efectivamente corrió (rama paralela garantiza esto).
 
-El dashboard de Langfuse queda con: conversaciones trazadas en tiempo real, costo diario por agente, latencia promedio por estado, y tasa de éxito de las llamadas Claude.
+Cada trace incluye: `session_id`, `agent`, `state/action`, `language`, `input_tokens`, `output_tokens`, `cost_usd`, `phi_stripped`. El batch envía `trace-create` + `generation-create` en una sola llamada para que el trace padre exista antes que la generación.
 
-Nota sobre producción futura: cuando el sistema migre a Azure, Langfuse se despliega self-hosted dentro de la infraestructura de Pangi con imagen Docker oficial. El código de integración en N8N o LangGraph es idéntico, solo cambia la URL del endpoint de `cloud.langfuse.com` a la instancia interna. Cero cambio de lógica.
+Credencial `Langfuse — Pangi` (Basic Auth) creada en N8N.
 
-**Archivos necesarios:** ninguno.
+> **Nota sobre producción:** al migrar a Azure, Langfuse corre self-hosted. Solo cambia la URL del endpoint — cero cambio de lógica en N8N o LangGraph.
 
-**Entregable:** Langfuse conectado, dashboard mostrando conversaciones reales. Screenshot o grabación de pantalla para incluir en la demo a el CEO de Pangi.
-
-**Estimado:** 1 sesión.
+**Archivos modificados:** `01_nova.json`, `02_sage.json`, `03_atlas.json`
 
 ---
 
-### PASO 5 — GONEX migration + Supabase prep + documentación final
+### PASO 5 — GONEX migration + Supabase prep + documentación final ⏳ PENDIENTE
 **Objetivo:** sistema limpio, documentado y listo para la demo. Base preparada para RAG sin activarlo aún.
 
 **Qué se hace:**
 
-Primero, si el sistema no está aún en GONEX, se aplica el proceso de migración del `02_migration_gonex_v2.md` ya generado, con los ajustes de los pasos 1-4 incorporados.
+Migración completa al VPS GONEX siguiendo `02_migration_gonex.md` (v2.0.0), que incorpora todos los cambios de los pasos 1-4.
 
-Segundo, se agrega la columna vector a la tabla `knowledge_base` en PostgreSQL:
-
+Preparación del schema para RAG (sin activar):
 ```sql
 ALTER TABLE knowledge_base ADD COLUMN embedding vector(1536);
 CREATE INDEX ON knowledge_base USING ivfflat (embedding vector_cosine_ops);
 ```
 
-La columna queda vacía. Cuando llegue el momento de activar RAG, un script de embeddings la llena y el sistema empieza a hacer búsqueda semántica sin ningún otro cambio estructural. La preparación está hecha, el interruptor no está encendido.
-
-Tercero, se actualiza la documentación del proyecto: `02_migration_gonex_v2.md` incorpora los cambios de todos los pasos, el stack actualizado con LiteLLM y Langfuse, y una sección nueva de roadmap post-MVP que documenta el path a LangGraph y Azure.
-
-**Entregable:** sistema completo corriendo en GONEX con observabilidad activa, esquema preparado para RAG, documentación actualizada. Demo lista para el CEO de Pangi.
+**Entregable:** sistema completo corriendo en GONEX con LiteLLM en Docker, observabilidad activa en Langfuse, schema preparado para RAG. Demo lista para el CEO de Pangi.
 
 **Estimado:** 1 sesión.
 
 ---
 
 ### POST-MVP — LangGraph en GONEX (antes de Azure)
-Este paso ocurre después de la demo a el CEO de Pangi, no es parte del MVP pero es parte del roadmap completo. Se construye el sistema de agentes en Python con LangGraph y FastAPI. N8N queda solo para manejo de webhooks de WhatsApp y notificaciones externas. Los prompts, la knowledge base y el diseño de agentes se transfieren directamente. Cuando Azure esté disponible, este código va ahí sin cambios.
-
----
-
-Estamos listos. Comparte los JSON de `02_sage.json`, `03_atlas.json` y `00_orchestrator.json` y arrancamos el Paso 1.
+Después de la demo a el CEO de Pangi. Sistema de agentes reconstruido en Python con LangGraph y FastAPI. N8N queda solo para manejo de webhooks de WhatsApp y notificaciones externas. Los prompts (`/prompts/*.md`), la knowledge base y el diseño de agentes se transfieren directamente. Cuando Azure esté disponible, este código va ahí sin cambios estructurales.

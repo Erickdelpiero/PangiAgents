@@ -105,8 +105,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -448,
-        592
+        -1024,
+        1136
       ]
     },
     {
@@ -119,8 +119,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -208,
-        592
+        -800,
+        1136
       ]
     },
     {
@@ -132,8 +132,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        32,
-        592
+        -544,
+        1136
       ]
     },
     {
@@ -166,21 +166,21 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// PREPARAR NLG SAGE v1.0 — Paso 3\n// Inserta entre Motor y Guardar Intake.\n// Decide si Claude Sonnet aplica según el estado y construye\n// el prompt más potente posible para ese estado.\n// ============================================================\nconst motor = $input.first().json;\n\nconst state    = motor.newSageContext?.state || '';\nconst sage     = motor.newSageContext || {};\nconst LANG     = motor.detectedLanguage || motor.userLanguage || 'es';\nconst userMsg  = motor.messageText ||\n               $('🔍 Validar Input SAGE').first().json?.messageText || '';\nconst fn       = motor.userName ? motor.userName.split(' ')[0] : null;\nconst nm       = fn ? ` ${fn}` : '';\n\n// Estados donde Claude Sonnet agrega valor real:\n// 'questioning' → coherencia, escape, extracción natural\n// 'procedure_confirmed' → intro clínica en idioma del usuario\n// 'handoff_received' + sin procedimiento → mejor detección\n// 'summary' → descripción más humana del resumen\nconst CLAUDE_STATES = ['questioning', 'handoff_received', 'summary', 'selecting_specialty', 'procedure_confirmed'];\n\nif (!CLAUDE_STATES.includes(state)) {\n  return [{ json: { ...motor, _nlgSkip: true, _nlgReason: `skip_state:${state}` } }];\n}\n\n// ── LANG names ────────────────────────────────────────────────\nconst LANG_NAMES = { es: 'español', en: 'English', pt: 'português' };\nconst langName = LANG_NAMES[LANG] || 'español';\nconst langInstruction = LANG === 'es'\n  ? 'Responde SIEMPRE en español.'\n  : LANG === 'en'\n  ? 'Always respond in English.'\n  : 'Responda SEMPRE em português.';\n\n// ── Build prompt per state ────────────────────────────────────\nlet systemPrompt = '';\nlet userContent  = '';\nlet maxTokens    = 400;\n\n// ─── STATE: questioning ───────────────────────────────────────\nif (state === 'questioning') {\n  const questions   = sage.critical_questions || [];\n  const infoKeys    = sage.required_info      || [];\n  const currentIdx  = (sage.current_q_index || 1);       // 1-based, NEXT question (motor already incremented)\n  const prevIdx     = currentIdx - 1;                    // the question that WAS asked\n  const totalQ      = questions.length;\n  const collected   = sage.collected_data || {};\n  const procedure   = sage.procedure_name || '';\n\n  const qHeader = LANG === 'en'\n  ? `*Question ${currentIdx} of ${totalQ}:*`\n  : LANG === 'pt'\n  ? `*Pergunta ${currentIdx} de ${totalQ}:*`\n  : `*Pregunta ${currentIdx} de ${totalQ}:*`;\n  \n  // FIX v2.2.2: prevIdx===0 → mensaje de inicio (listo/ok/ready), NO respuesta a Q.\n  // El motor en procedure_confirmed ya generó Q1 en responseText.\n  // Saltar NLG evita que Claude evalúe \"listo\" como respuesta a pregunta vacía.\n  if (prevIdx === 0) {\n    if (LANG === 'es') {\n      return [{ json: { ...motor, _nlgSkip: true, _nlgReason: 'start_signal_not_answer_es' } }];\n    }\n    const targetLang = LANG === 'en' ? 'English' : 'Portuguese';\n    return [{ json: {\n      ...motor,\n      _nlgSkip: false,\n      _nlgState: 'procedure_confirmed',\n      claudeSagePayload: {\n        model: 'claude-sonnet-4-20250514',\n        max_tokens: 300,\n        system: `You are SAGE, a medical quotes specialist at Pangi.\\nAlways respond in ${targetLang}.\\n\\nTranslate the following message to ${targetLang}. It may contain Spanish — translate ALL Spanish parts, especially the medical question:\\n---\\n${motor.responseText || ''}\\n---\\nKeep WhatsApp format (*bold*, emojis). Return ONLY the translated message, no explanations.`,\n        messages: [{ role: 'user', content: `Translate to ${targetLang}` }]\n      }\n    }}];\n  }\n\n  const prevQuestion   = questions[prevIdx - 1] || '';\n  const nextQuestion   = currentIdx <= totalQ ? questions[currentIdx - 1] : null;\n  const isLastAnswered = currentIdx > totalQ;\n\n  const collectedSummary = Object.entries(collected)\n    .map(([k,v]) => `- ${k}: ${v}`)\n    .join('\\n') || '(ninguna aún)';\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi. Tu misión: preparar solicitudes médicas completas y precisas.\n${langInstruction}\n\nPROCEDIMIENTO: ${procedure}\nPREGUNTA QUE SE HIZO AL USUARIO (Nº ${prevIdx} de ${totalQ}): \"${prevQuestion}\"\nDATOS YA RECOPILADOS:\n${collectedSummary}\n${nextQuestion ? `SIGUIENTE PREGUNTA A HACER: \"${nextQuestion}\"${LANG !== 'es' ? `\\n⚠️ TRADUCCIÓN OBLIGATORIA: La pregunta anterior puede estar en español. En tu responseText SIEMPRE debes escribirla en ${langName}. Nunca copies texto en español si el idioma es ${langName}.` : ''}` : 'YA SE RESPONDIÓ LA ÚLTIMA PREGUNTA.'}\n\nTAREA: El usuario respondió. Analiza su respuesta y genera la respuesta JSON siguiente.\n\nREGLAS DE ANÁLISIS:\n1. isCoherent=true: la respuesta tiene CUALQUIER relación con la pregunta clínica.\n   Incluye respuestas cortas (\"sí\", \"no\", \"nunca\", \"tengo 2\", \"hace 3 años\"),\n   aunque sean imprecisas o incompletas — si el paciente claramente está respondiendo la pregunta.\n2. isCoherent=false: SOLO cuando el mensaje NO puede ser interpretado como respuesta a la pregunta clínica.\n   Ejemplos de isCoherent=false: saludos desconectados (\"hola qué tal\"), preguntas de otro tema,\n   comandos de escape explícitos, o texto sin ninguna relación con el tema médico.\n   IMPORTANTE: \"sí tengo\" / \"no tengo\" / \"nunca\" / números solos = isCoherent=true si responden la pregunta.\n3. escapeIntent: usar solo si isCoherent=false Y hay intención clara de salir.\n   - \"change_procedure\": quiere cambiar a otro procedimiento médico\n   - \"go_atlas\": quiere comparar destinos o costos de viaje\n   - \"abort\": quiere cancelar el formulario completamente\n   - null: respuesta incoherente sin intención de escape (pedir que responda la pregunta)\n4. newProcedureKey: si escapeIntent=\"change_procedure\", el key exacto del procedimiento.\n   Keys disponibles: extraccion_simple, extraccion_muela_juicio, implante_dental, protesis_completa,\n   carillas_veneers, ortodoncia_brackets, ortodoncia_invisible, endodoncia, corona_dental,\n   limpieza_profunda, blanqueamiento, puente_dental, rinoplastia, abdominoplastia, liposuccion,\n   aumento_mamario, reduccion_mamaria, bichectomia, blefaroplastia, otoplastia, lifting_facial, bbl.\n   Si no aplica: null.\n5. cleanAnswer: versión concisa de la respuesta para el expediente médico.\n   Extrae el dato clínico limpio: \"no, nunca he fumado\" → \"No fumador\". Si isCoherent=false: null.\n6. extraData: si el usuario respondió a MÁS de una pregunta en el mismo mensaje,\n   extrae los campos adicionales como objeto {key: cleanValue}. Si no aplica: {}.\n\nFORMATO DE RESPUESTA (JSON estricto, sin markdown):\n{\n  \"isCoherent\": true,\n  \"escapeIntent\": null,\n  \"newProcedureKey\": null,\n  \"cleanAnswer\": \"respuesta concisa para el expediente\",\n  \"extraData\": {},\n  \"responseText\": \"tu mensaje natural para el usuario\"\n}\n\nREGLAS PARA responseText (${langInstruction}):\n- Si isCoherent=true y NO es última pregunta:\n  PASO 1: Una frase corta y empática que confirme el dato recibido.\n  - PASO 2: ${LANG === 'es'\n  ? `COPIA TEXTUAL la siguiente pregunta sin cambiarla: \"${nextQuestion}\"`\n  : `TRADUCE FIELMENTE al ${langName} la siguiente pregunta (está en español): \"${nextQuestion}\". Nunca la dejes en español. Traduce el contenido clínico exactamente, sin añadir ni quitar información.`}\n  Formato: [confirmación breve en 1 línea]. \\n\\n${qHeader}\\n[pregunta en ${langName}]\n- Si isCoherent=true y ES última pregunta (nextQuestion es null):\n  Confirma el último dato brevemente. Di que ya tienes todo y calcularás el resumen. NO hagas preguntas nuevas.\n- Si isCoherent=false + escapeIntent=\"change_procedure\": confirma el cambio de procedimiento.\n  Di en el idioma del usuario que en el siguiente mensaje empezará el formulario para el nuevo procedimiento.\n  Termina con una pregunta natural de invitación, como \"¿Listo/a para empezar?\" en el idioma del usuario. Nunca uses la frase \"escribe cualquier cosa\".\n- Si isCoherent=false + escapeIntent=\"go_atlas\": confirma y ofrece conectar con ATLAS\n- Si isCoherent=false + escapeIntent=\"abort\": confirma cancelación amablemente\n- Si isCoherent=false + escapeIntent=null: pide amablemente que responda la pregunta.\n  Repite la pregunta COPIANDO TEXTUALMENTE: \"${prevQuestion}\". No la reformules.\n- Máximo 4 líneas, formato WhatsApp (*negritas* para énfasis), tono cálido y profesional`;\n\n  userContent = `El usuario respondió: \"${userMsg}\"`;\n  maxTokens = 350;\n\n// ─── STATE: procedure_confirmed ───────────────────────────────\n} else if (state === 'procedure_confirmed') {\n  // Motor just transitioned from procedure_confirmed to questioning\n  // and generated the first question. Claude translates/naturalizes it.\n  const firstQ    = sage.critical_questions?.[0] || '';\n  const procedure = sage.procedure_name || '';\n  const introMsg  = motor.responseText || '';\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi.\n${langInstruction}\n\nVas a iniciar el formulario de cotización para: *${procedure}*\nLa primera pregunta clínica es: \"${firstQ}\"\n\nEl sistema generó este mensaje de intro: \"${introMsg}\"\n\nTAREA: Reescribe el mensaje de introducción + primera pregunta de forma:\n- Natural y conversacional (no robótica)\n- En ${langName}\n- Máximo 4 líneas\n- Que genere confianza en el paciente\n- Formato WhatsApp (*negritas*)\n\nResponde SOLO con el texto del mensaje, sin JSON.`;\n\n  userContent = `Procedimiento: ${procedure}, idioma: ${LANG}`;\n  maxTokens = 200;\n\n// ─── STATE: summary ───────────────────────────────────────────\n} else if (state === 'summary') {\n  const procedure  = sage.procedure_name || '';\n  const collected  = sage.collected_data || {};\n  const score      = sage.completeness_score || 0;\n  const exams      = sage.required_exams || [];\n\n  const dataStr = Object.entries(collected)\n    .map(([k,v]) => `- ${k.replace(/_/g,' ')}: ${v}`)\n    .join('\\n');\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi.\n${langInstruction}\n\nEl paciente acaba de completar el formulario de cotización para: *${procedure}*\nDatos recopilados:\n${dataStr}\nScore de completitud: ${score}%\nExámenes recomendados: ${exams.join(', ') || 'ninguno'}\n\nTAREA: Escribe un mensaje de resumen que:\n1. Confirme brevemente los puntos más importantes del caso (selecciona los 2-3 más relevantes)\n2. Muestre el score de completitud y lo que significa para las cotizaciones\n3. Pida confirmación para publicar la solicitud\n4. Sea empático y motive al paciente\n\n⚠️ REGLA CRÍTICA: NO hagas nuevas preguntas clínicas. Los datos ya fueron recopilados.\nTu única tarea es resumir lo que tienes y pedir confirmación. Si ves campos sin llenar,\nmencionarlos como \"exámenes opcionales recomendados\" pero NO como preguntas.\n\nFormato WhatsApp (*negritas*), máximo 8 líneas.\nIncluye al final: \"Escribe *confirmar* para publicar\" (en el idioma correcto).\nResponde SOLO con el texto del mensaje.`;\n\n  userContent = `Procedimiento: ${procedure}`;\n  maxTokens = 400;\n\n// ─── STATE: selecting_specialty (Claude intenta detectar desde contexto) ──\n} else if (state === 'selecting_specialty') {\n  const pendingMsg = motor.newSageContext?.pendingMessage || \n                     motor.inputContext?.sage?.pendingMessage || '';\n  const combinedContext = [pendingMsg, userMsg].filter(Boolean).join('. ');\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi.\n${langInstruction}\n\nEl usuario quiere cotizar un procedimiento. A partir de su descripción intenta:\n1. Identificar la especialidad (dental o cirugía plástica)\n2. Si posible, identificar el procedimiento específico\n\nProcedimientos dentales: extraccion_simple, extraccion_muela_juicio, implante_dental, protesis_completa, carillas_veneers, ortodoncia_brackets, ortodoncia_invisible, endodoncia, corona_dental, limpieza_profunda, blanqueamiento, puente_dental\nProcedimientos plástica: rinoplastia, abdominoplastia, liposuccion, aumento_mamario, reduccion_mamaria, bichectomia, blefaroplastia, otoplastia, lifting_facial, bbl\n\nResponde en JSON estricto sin markdown:\n{\n  \"detectedSpecialty\": \"dental | plastic_surgery | null\",\n  \"detectedProcedureKey\": \"key_o_null\",\n  \"responseText\": \"pregunta natural en ${langName} para confirmar o avanzar\"\n}`;\n\n  userContent = `El usuario describió: \"${combinedContext}\"`;\n  maxTokens = 200;\n}\n\n// ─── procedure_confirmed — traducción para usuarios no hispanohablantes ───\nif (state === 'procedure_confirmed') {\n  if (LANG === 'es') {\n    return [{ json: { ...motor, _nlgSkip: true, _nlgReason: 'procedure_confirmed_es' } }];\n  }\n  const langName = LANG === 'en' ? 'English' : 'Portuguese';\n  const templateText = motor.responseText || '';\n\n  systemPrompt = `You are SAGE, a medical quotes specialist at Pangi.\nAlways respond in ${langName}.\n\nTranslate the following message to ${langName}. It may be partially in Spanish — translate the Spanish parts and keep what is already in ${langName}:\n---\n${templateText}\n---\nKeep WhatsApp format (*bold*, emojis). Return ONLY the translated message, no explanations.`;\n\n  userContent = `Translate to ${langName}`;\n  maxTokens = 300;\n}\n\nreturn [{ json: {\n  ...motor,\n  _nlgSkip: false,\n  _nlgState: state,\n  claudeSagePayload: {\n    model: 'claude-sonnet-4-20250514',\n    max_tokens: maxTokens,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userContent }]\n  }\n}}];\n"
+        "jsCode": "// ============================================================\n// PREPARAR NLG SAGE v1.0 — Paso 3\n// Inserta entre Motor y Guardar Intake.\n// Decide si Claude Sonnet aplica según el estado y construye\n// el prompt más potente posible para ese estado.\n// ============================================================\nconst raw   = $input.first().json;\nconst motor = raw._phi_clean || raw;\n\nconst state    = motor.newSageContext?.state || '';\nconst sage     = motor.newSageContext || {};\nconst LANG     = motor.detectedLanguage || motor.userLanguage || 'es';\nconst userMsg  = motor.messageText ||\n               $('🔍 Validar Input SAGE').first().json?.messageText || '';\nconst fn       = motor.userName ? motor.userName.split(' ')[0] : null;\nconst nm       = fn ? ` ${fn}` : '';\n\n// Estados donde Claude Sonnet agrega valor real:\n// 'questioning' → coherencia, escape, extracción natural\n// 'procedure_confirmed' → intro clínica en idioma del usuario\n// 'handoff_received' + sin procedimiento → mejor detección\n// 'summary' → descripción más humana del resumen\nconst CLAUDE_STATES = ['questioning', 'handoff_received', 'summary', 'selecting_specialty', 'procedure_confirmed'];\n\nif (!CLAUDE_STATES.includes(state)) {\n  return [{ json: { ...raw, _nlgSkip: true, _nlgReason: `skip_state:${state}` } }];\n}\n\n// ── LANG names ────────────────────────────────────────────────\nconst LANG_NAMES = { es: 'español', en: 'English', pt: 'português' };\nconst langName = LANG_NAMES[LANG] || 'español';\nconst langInstruction = LANG === 'es'\n  ? 'Responde SIEMPRE en español.'\n  : LANG === 'en'\n  ? 'Always respond in English.'\n  : 'Responda SEMPRE em português.';\n\n// ── Build prompt per state ────────────────────────────────────\nlet systemPrompt = '';\nlet userContent  = '';\nlet maxTokens    = 400;\n\n// ─── STATE: questioning ───────────────────────────────────────\nif (state === 'questioning') {\n  const questions   = sage.critical_questions || [];\n  const infoKeys    = sage.required_info      || [];\n  const currentIdx  = (sage.current_q_index || 1);       // 1-based, NEXT question (motor already incremented)\n  const prevIdx     = currentIdx - 1;                    // the question that WAS asked\n  const totalQ      = questions.length;\n  const collected   = sage.collected_data || {};\n  const procedure   = sage.procedure_name || '';\n\n  const qHeader = LANG === 'en'\n  ? `*Question ${currentIdx} of ${totalQ}:*`\n  : LANG === 'pt'\n  ? `*Pergunta ${currentIdx} de ${totalQ}:*`\n  : `*Pregunta ${currentIdx} de ${totalQ}:*`;\n  \n  // FIX v2.2.2: prevIdx===0 → mensaje de inicio (listo/ok/ready), NO respuesta a Q.\n  // El motor en procedure_confirmed ya generó Q1 en responseText.\n  // Saltar NLG evita que Claude evalúe \"listo\" como respuesta a pregunta vacía.\n  if (prevIdx === 0) {\n    if (LANG === 'es') {\n      return [{ json: { ...raw, _nlgSkip: true, _nlgReason: 'start_signal_not_answer_es' } }];\n    }\n    const targetLang = LANG === 'en' ? 'English' : 'Portuguese';\n    return [{ json: {\n      ...raw,\n      _nlgSkip: false,\n      _nlgState: 'procedure_confirmed',\n      claudeSagePayload: {\n        model: 'claude-sonnet-4-20250514',\n        max_tokens: 300,\n        system: `You are SAGE, a medical quotes specialist at Pangi.\\nAlways respond in ${targetLang}.\\n\\nTranslate the following message to ${targetLang}. It may contain Spanish — translate ALL Spanish parts, especially the medical question:\\n---\\n${motor.responseText || ''}\\n---\\nKeep WhatsApp format (*bold*, emojis). Return ONLY the translated message, no explanations.`,\n        messages: [{ role: 'user', content: `Translate to ${targetLang}` }]\n      }\n    }}];\n  }\n\n  const prevQuestion   = questions[prevIdx - 1] || '';\n  const nextQuestion   = currentIdx <= totalQ ? questions[currentIdx - 1] : null;\n  const isLastAnswered = currentIdx > totalQ;\n\n  const collectedSummary = Object.entries(collected)\n    .map(([k,v]) => `- ${k}: ${v}`)\n    .join('\\n') || '(ninguna aún)';\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi. Tu misión: preparar solicitudes médicas completas y precisas.\n${langInstruction}\n\nPROCEDIMIENTO: ${procedure}\nPREGUNTA QUE SE HIZO AL USUARIO (Nº ${prevIdx} de ${totalQ}): \"${prevQuestion}\"\nDATOS YA RECOPILADOS:\n${collectedSummary}\n${nextQuestion ? `SIGUIENTE PREGUNTA A HACER: \"${nextQuestion}\"${LANG !== 'es' ? `\\n⚠️ TRADUCCIÓN OBLIGATORIA: La pregunta anterior puede estar en español. En tu responseText SIEMPRE debes escribirla en ${langName}. Nunca copies texto en español si el idioma es ${langName}.` : ''}` : 'YA SE RESPONDIÓ LA ÚLTIMA PREGUNTA.'}\n\nTAREA: El usuario respondió. Analiza su respuesta y genera la respuesta JSON siguiente.\n\nREGLAS DE ANÁLISIS:\n1. isCoherent=true: la respuesta tiene CUALQUIER relación con la pregunta clínica.\n   Incluye respuestas cortas (\"sí\", \"no\", \"nunca\", \"tengo 2\", \"hace 3 años\"),\n   aunque sean imprecisas o incompletas — si el paciente claramente está respondiendo la pregunta.\n2. isCoherent=false: SOLO cuando el mensaje NO puede ser interpretado como respuesta a la pregunta clínica.\n   Ejemplos de isCoherent=false: saludos desconectados (\"hola qué tal\"), preguntas de otro tema,\n   comandos de escape explícitos, o texto sin ninguna relación con el tema médico.\n   IMPORTANTE: \"sí tengo\" / \"no tengo\" / \"nunca\" / números solos = isCoherent=true si responden la pregunta.\n3. escapeIntent: usar solo si isCoherent=false Y hay intención clara de salir.\n   - \"change_procedure\": quiere cambiar a otro procedimiento médico\n   - \"go_atlas\": quiere comparar destinos o costos de viaje\n   - \"abort\": quiere cancelar el formulario completamente\n   - null: respuesta incoherente sin intención de escape (pedir que responda la pregunta)\n4. newProcedureKey: si escapeIntent=\"change_procedure\", el key exacto del procedimiento.\n   Keys disponibles: extraccion_simple, extraccion_muela_juicio, implante_dental, protesis_completa,\n   carillas_veneers, ortodoncia_brackets, ortodoncia_invisible, endodoncia, corona_dental,\n   limpieza_profunda, blanqueamiento, puente_dental, rinoplastia, abdominoplastia, liposuccion,\n   aumento_mamario, reduccion_mamaria, bichectomia, blefaroplastia, otoplastia, lifting_facial, bbl.\n   Si no aplica: null.\n5. cleanAnswer: versión concisa de la respuesta para el expediente médico.\n   Extrae el dato clínico limpio: \"no, nunca he fumado\" → \"No fumador\". Si isCoherent=false: null.\n6. extraData: si el usuario respondió a MÁS de una pregunta en el mismo mensaje,\n   extrae los campos adicionales como objeto {key: cleanValue}. Si no aplica: {}.\n\nFORMATO DE RESPUESTA (JSON estricto, sin markdown):\n{\n  \"isCoherent\": true,\n  \"escapeIntent\": null,\n  \"newProcedureKey\": null,\n  \"cleanAnswer\": \"respuesta concisa para el expediente\",\n  \"extraData\": {},\n  \"responseText\": \"tu mensaje natural para el usuario\"\n}\n\nREGLAS PARA responseText (${langInstruction}):\n- Si isCoherent=true y NO es última pregunta:\n  PASO 1: Una frase corta y empática que confirme el dato recibido.\n  - PASO 2: ${LANG === 'es'\n  ? `COPIA TEXTUAL la siguiente pregunta sin cambiarla: \"${nextQuestion}\"`\n  : `TRADUCE FIELMENTE al ${langName} la siguiente pregunta (está en español): \"${nextQuestion}\". Nunca la dejes en español. Traduce el contenido clínico exactamente, sin añadir ni quitar información.`}\n  Formato: [confirmación breve en 1 línea]. \\n\\n${qHeader}\\n[pregunta en ${langName}]\n- Si isCoherent=true y ES última pregunta (nextQuestion es null):\n  Confirma el último dato brevemente. Di que ya tienes todo y calcularás el resumen. NO hagas preguntas nuevas.\n- Si isCoherent=false + escapeIntent=\"change_procedure\": confirma el cambio de procedimiento.\n  Di en el idioma del usuario que en el siguiente mensaje empezará el formulario para el nuevo procedimiento.\n  Termina con una pregunta natural de invitación, como \"¿Listo/a para empezar?\" en el idioma del usuario. Nunca uses la frase \"escribe cualquier cosa\".\n- Si isCoherent=false + escapeIntent=\"go_atlas\": confirma y ofrece conectar con ATLAS\n- Si isCoherent=false + escapeIntent=\"abort\": confirma cancelación amablemente\n- Si isCoherent=false + escapeIntent=null: pide amablemente que responda la pregunta.\n  Repite la pregunta COPIANDO TEXTUALMENTE: \"${prevQuestion}\". No la reformules.\n- Máximo 4 líneas, formato WhatsApp (*negritas* para énfasis), tono cálido y profesional`;\n\n  userContent = `El usuario respondió: \"${userMsg}\"`;\n  maxTokens = 350;\n\n// ─── STATE: procedure_confirmed ───────────────────────────────\n} else if (state === 'procedure_confirmed') {\n  // Motor just transitioned from procedure_confirmed to questioning\n  // and generated the first question. Claude translates/naturalizes it.\n  const firstQ    = sage.critical_questions?.[0] || '';\n  const procedure = sage.procedure_name || '';\n  const introMsg  = motor.responseText || '';\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi.\n${langInstruction}\n\nVas a iniciar el formulario de cotización para: *${procedure}*\nLa primera pregunta clínica es: \"${firstQ}\"\n\nEl sistema generó este mensaje de intro: \"${introMsg}\"\n\nTAREA: Reescribe el mensaje de introducción + primera pregunta de forma:\n- Natural y conversacional (no robótica)\n- En ${langName}\n- Máximo 4 líneas\n- Que genere confianza en el paciente\n- Formato WhatsApp (*negritas*)\n\nResponde SOLO con el texto del mensaje, sin JSON.`;\n\n  userContent = `Procedimiento: ${procedure}, idioma: ${LANG}`;\n  maxTokens = 200;\n\n// ─── STATE: summary ───────────────────────────────────────────\n} else if (state === 'summary') {\n  const procedure  = sage.procedure_name || '';\n  const collected  = sage.collected_data || {};\n  const score      = sage.completeness_score || 0;\n  const exams      = sage.required_exams || [];\n\n  const dataStr = Object.entries(collected)\n    .map(([k,v]) => `- ${k.replace(/_/g,' ')}: ${v}`)\n    .join('\\n');\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi.\n${langInstruction}\n\nEl paciente acaba de completar el formulario de cotización para: *${procedure}*\nDatos recopilados:\n${dataStr}\nScore de completitud: ${score}%\nExámenes recomendados: ${exams.join(', ') || 'ninguno'}\n\nTAREA: Escribe un mensaje de resumen que:\n1. Confirme brevemente los puntos más importantes del caso (selecciona los 2-3 más relevantes)\n2. Muestre el score de completitud y lo que significa para las cotizaciones\n3. Pida confirmación para publicar la solicitud\n4. Sea empático y motive al paciente\n\n⚠️ REGLA CRÍTICA: NO hagas nuevas preguntas clínicas. Los datos ya fueron recopilados.\nTu única tarea es resumir lo que tienes y pedir confirmación. Si ves campos sin llenar,\nmencionarlos como \"exámenes opcionales recomendados\" pero NO como preguntas.\n\nFormato WhatsApp (*negritas*), máximo 8 líneas.\nIncluye al final: \"Escribe *confirmar* para publicar\" (en el idioma correcto).\nResponde SOLO con el texto del mensaje.`;\n\n  userContent = `Procedimiento: ${procedure}`;\n  maxTokens = 400;\n\n// ─── STATE: selecting_specialty (Claude intenta detectar desde contexto) ──\n} else if (state === 'selecting_specialty') {\n  const pendingMsg = motor.newSageContext?.pendingMessage || \n                     motor.inputContext?.sage?.pendingMessage || '';\n  const combinedContext = [pendingMsg, userMsg].filter(Boolean).join('. ');\n\n  systemPrompt = `Eres SAGE, especialista en cotizaciones médicas de Pangi.\n${langInstruction}\n\nEl usuario quiere cotizar un procedimiento. A partir de su descripción intenta:\n1. Identificar la especialidad (dental o cirugía plástica)\n2. Si posible, identificar el procedimiento específico\n\nProcedimientos dentales: extraccion_simple, extraccion_muela_juicio, implante_dental, protesis_completa, carillas_veneers, ortodoncia_brackets, ortodoncia_invisible, endodoncia, corona_dental, limpieza_profunda, blanqueamiento, puente_dental\nProcedimientos plástica: rinoplastia, abdominoplastia, liposuccion, aumento_mamario, reduccion_mamaria, bichectomia, blefaroplastia, otoplastia, lifting_facial, bbl\n\nResponde en JSON estricto sin markdown:\n{\n  \"detectedSpecialty\": \"dental | plastic_surgery | null\",\n  \"detectedProcedureKey\": \"key_o_null\",\n  \"responseText\": \"pregunta natural en ${langName} para confirmar o avanzar\"\n}`;\n\n  userContent = `El usuario describió: \"${combinedContext}\"`;\n  maxTokens = 200;\n}\n\n// ─── procedure_confirmed — traducción para usuarios no hispanohablantes ───\nif (state === 'procedure_confirmed') {\n  if (LANG === 'es') {\n    return [{ json: { ...raw, _nlgSkip: true, _nlgReason: 'procedure_confirmed_es' } }];\n  }\n  const langName = LANG === 'en' ? 'English' : 'Portuguese';\n  const templateText = motor.responseText || '';\n\n  systemPrompt = `You are SAGE, a medical quotes specialist at Pangi.\nAlways respond in ${langName}.\n\nTranslate the following message to ${langName}. It may be partially in Spanish — translate the Spanish parts and keep what is already in ${langName}:\n---\n${templateText}\n---\nKeep WhatsApp format (*bold*, emojis). Return ONLY the translated message, no explanations.`;\n\n  userContent = `Translate to ${langName}`;\n  maxTokens = 300;\n}\n\nreturn [{ json: {\n  ...raw,\n  _nlgSkip: false,\n  _nlgState: state,\n  claudeSagePayload: {\n    model: 'claude-sonnet-4-20250514',\n    max_tokens: maxTokens,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userContent }]\n  }\n}}];\n"
       },
       "id": "fcd34b02-a7f7-47c2-8bcd-84c0864eb7a9",
       "name": "📦 Preparar — NLG SAGE",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -528,
-        384
+        -1040,
+        768
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
+        "url": "http://127.0.0.1:4000/v1/messages",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "anthropicApi",
         "sendHeaders": true,
@@ -209,8 +209,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        -288,
-        384
+        -400,
+        752
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -234,12 +234,136 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -48,
-        384
+        -192,
+        944
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// 🔐 Strip PHI v1.0\n// Elimina identificadores personales antes de llamar a Claude.\n// PHI eliminado: userName, userPhone, claudeContext.userName\n// Datos completos preservados en el payload principal para\n// nodos downstream (WhatsApp, DB, Construir Respuesta Final).\n// ============================================================\nconst inp = $input.first().json;\n\nconst phiClean = {\n  ...inp,\n  userName:  null,\n  userPhone: null,\n  ...(inp.claudeContext\n    ? { claudeContext: { ...inp.claudeContext, userName: null } }\n    : {})\n};\n\n// _phi_clean excluye también remoteJid e instance\nconst { remoteJid, instance, userPhone, ...clinicalOnly } = phiClean;\n\nreturn [{ json: {\n  ...inp,              // datos completos para nodos posteriores\n  phi_stripped: true,\n  _phi_clean: {\n    ...clinicalOnly,   // solo datos clínicos para Claude\n    userName:  null,\n    userPhone: null\n  }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        496
+      ],
+      "id": "4564811b-19ad-492e-806d-0d22a1ba9148",
+      "name": "🔐 Strip PHI"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26193916-32e7-4c30-a846-ca70e63d80a6",
+              "leftValue": "={{ $json._nlgSkip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -800,
+        768
+      ],
+      "id": "64221e8b-89cf-4dd4-985f-6868d32fcc39",
+      "name": "✅ ¿NLG Activo?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prepData    = $('📦 Preparar — NLG SAGE').first().json;\nconst claudeResp  = $input.first().json;\n\nconst sessionId    = prepData.sessionId || 'unknown';\nconst state        = prepData._nlgState || 'unknown';\nconst language     = prepData.detectedLanguage || prepData.userLanguage || 'es';\nconst model        = prepData.claudeSagePayload?.model || 'claude-sonnet-4-20250514';\nconst inputTokens  = claudeResp?.usage?.input_tokens  || 0;\nconst outputTokens = claudeResp?.usage?.output_tokens || 0;\nconst outputText   = claudeResp?.content?.[0]?.text   || '';\n\nconst PRICES = {\n  'claude-sonnet-4-20250514':  { in: 3.00, out: 15.00 },\n  'claude-haiku-4-5-20251001': { in: 0.80, out: 4.00  }\n};\nconst p       = PRICES[model] || PRICES['claude-sonnet-4-20250514'];\nconst costUsd = ((inputTokens * p.in) + (outputTokens * p.out)) / 1_000_000;\nconst now     = new Date().toISOString();\nconst ts      = Date.now();\n\nreturn [{ json: {\n  _langfusePayload: {\n    batch: [\n      {\n        id:        `trace-${sessionId}-${ts}`,\n        type:      'trace-create',\n        timestamp: now,\n        body: {\n          id:       `pangi-${sessionId}`,\n          name:     `pangi-session-${sessionId}`,\n          metadata: { session_id: sessionId, language, phi_stripped: prepData.phi_stripped || false }\n        }\n      },\n      {\n        id:        `sage-${sessionId}-${ts}`,\n        type:      'generation-create',\n        timestamp: now,\n        body: {\n          id:        `gen-sage-${sessionId}-${ts}`,\n          traceId:   `pangi-${sessionId}`,\n          name:      `sage-${state}`,\n          model,\n          startTime: now,\n          endTime:   now,\n          input:  { prompt: (prepData.claudeSagePayload?.system || '').substring(0, 800) },\n          output: { text: outputText.substring(0, 500) },\n          usage:  { input: inputTokens, output: outputTokens, unit: 'TOKENS' },\n          metadata: {\n            agent:        'SAGE',\n            state,\n            language,\n            session_id:   sessionId,\n            phi_stripped: prepData.phi_stripped || false,\n            cost_usd:     parseFloat(costUsd.toFixed(6))\n          }\n        }\n      }\n    ]\n  }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        752
+      ],
+      "id": "d0a195f8-eb5c-47b0-88e3-308bdd169b79",
+      "name": "📊 Langfuse — SAGE"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us.cloud.langfuse.com/api/public/ingestion",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._langfusePayload) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        16,
+        752
+      ],
+      "id": "b04fda32-1e44-41d6-9c2c-b8277eac23c4",
+      "name": "📤 Langfuse — Enviar (SAGE)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "AFoErPLi59IsLVhK",
+          "name": "Langfuse — Pangi"
+        }
+      }
     }
   ],
-  "pinData": {},
+  "pinData": {
+    "📥 Llamada Entrante": [
+      {
+        "json": {
+          "userId": 34,
+          "userName": "Erick Del Piero ⚡",
+          "userLanguage": "es",
+          "userPhone": "+51941915097",
+          "sessionId": 16,
+          "activeAgent": "SAGE",
+          "sessionState": "sage_active",
+          "sessionContext": {
+            "nova": {
+              "state": "handoff_complete"
+            },
+            "sage": {
+              "state": "selecting_specialty",
+              "pendingMessage": null
+            },
+            "atlas": {},
+            "language": "es",
+            "patientProfile": {
+              "age": 15,
+              "sex": "M",
+              "conditions": "No, todo en orden, no tengo ninguna condición médica"
+            }
+          },
+          "isNewSession": false,
+          "messageText": "Quiero una rinoplastia por favor",
+          "messageType": "text",
+          "remoteJid": "51941915097@s.whatsapp.net",
+          "instance": "Test1",
+          "detectedLanguage": "es",
+          "targetAgent": "SAGE",
+          "intentDetected": "continue_sage",
+          "pendingHandoff": null
+        }
+      }
+    ]
+  },
   "connections": {
     "📥 Llamada Entrante": {
       "main": [
@@ -307,7 +431,7 @@
       "main": [
         [
           {
-            "node": "📦 Preparar — NLG SAGE",
+            "node": "🔐 Strip PHI",
             "type": "main",
             "index": 0
           }
@@ -340,7 +464,7 @@
       "main": [
         [
           {
-            "node": "☁️ Claude NLG — SAGE Sonnet",
+            "node": "✅ ¿NLG Activo?",
             "type": "main",
             "index": 0
           }
@@ -350,6 +474,11 @@
     "☁️ Claude NLG — SAGE Sonnet": {
       "main": [
         [
+          {
+            "node": "📊 Langfuse — SAGE",
+            "type": "main",
+            "index": 0
+          },
           {
             "node": "🔧 Procesar — NLG SAGE",
             "type": "main",
@@ -368,13 +497,53 @@
           }
         ]
       ]
+    },
+    "🔐 Strip PHI": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — NLG SAGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿NLG Activo?": {
+      "main": [
+        [
+          {
+            "node": "☁️ Claude NLG — SAGE Sonnet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔧 Procesar — NLG SAGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Langfuse — SAGE": {
+      "main": [
+        [
+          {
+            "node": "📤 Langfuse — Enviar (SAGE)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "fb0eb6c5-629b-4310-ad9f-c99837f8a08c",
+  "versionId": "731fff70-9cc3-41f0-828c-dd0c6ad987ee",
   "meta": {
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
   },

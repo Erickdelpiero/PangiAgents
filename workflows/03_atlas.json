@@ -132,8 +132,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -192,
-        0
+        -176,
+        448
       ]
     },
     {
@@ -166,21 +166,21 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// PREPARAR NLG ATLAS v1.0 — Paso 4\n// Inserta entre Motor y Construir Respuesta Final.\n// Claude Sonnet hace narrativa de análisis más rica y personal.\n// ============================================================\nconst motor = $input.first().json;\n\nconst atlasCtx = motor.newAtlasContext || {};\nconst state    = atlasCtx.state || '';\nconst LANG     = motor.detectedLanguage || motor.userLanguage || 'es';\nconst fn       = motor.userName ? motor.userName.split(' ')[0] : null;\nconst nm       = fn ? ` ${fn}` : '';\nconst sageCtx  = motor.inputContext?.sage || {};\nconst procedure = sageCtx.procedure_name || atlasCtx.procedure_type || '';\n\nconst LANG_NAMES = { es: 'español', en: 'English', pt: 'português' };\nconst langInstruction = LANG === 'es'\n  ? 'Responde SIEMPRE en español.'\n  : LANG === 'en'\n  ? 'Always respond in English.'\n  : 'Responda SEMPRE em português.';\n\n// States where Claude adds real value\nconst CLAUDE_STATES = ['comparison_done', 'exploring', 'has_quotes_check', 'checklist_shown', 'analyzing'];\nif (!CLAUDE_STATES.includes(state)) {\n  return [{ json: { ...motor, _nlgSkip: true, _nlgReason: `skip_state:${state}` } }];\n}\n\nconst usd = (n) => `$${parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:0})} USD`;\n\nlet systemPrompt = '';\nlet userContent  = '';\nlet maxTokens    = 450;\n\n// ─── comparison_done ────────────────────────────────────────\nif (state === 'comparison_done' || state === 'analyzing') {\n  const analysis = atlasCtx.analysis || [];\n  const best     = analysis[0];\n\n  const analysisStr = analysis.map((a, i) => {\n    const medals = ['🥇','🥈','🥉'];\n    return `${medals[i]||`${i+1}.`} ${a.destination_city}, ${a.destination_country}: procedimiento ${usd(a.procedure_cost)} + vuelo ${usd(a.flightCost)} + hotel ${usd(a.hotelCost)} (${a.recDays} noches) = TOTAL ${usd(a.totalCost)}`;\n  }).join('\\n');\n\n  const saving = analysis.length > 1\n    ? analysis[analysis.length-1].totalCost - analysis[0].totalCost\n    : 0;\n\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi. Tu especialidad: ayudar a pacientes a tomar la mejor decisión sobre dónde realizarse un procedimiento médico.\n${langInstruction}\n\nPROCEDIMIENTO DEL PACIENTE: ${procedure || 'procedimiento médico'}\nUSUARIO: ${fn || 'paciente'}\n\nANÁLISIS DE DESTINOS:\n${analysisStr}\n\n${saving > 0 ? `El destino más económico ahorra ${usd(saving)} vs el más caro.` : ''}\n\nTAREA: Escribe un análisis narrativo que:\n1. Presente el destino ganador con entusiasmo fundamentado (no solo precio)\n2. Explique brevemente POR QUÉ ese destino es la mejor opción para este procedimiento específico\n3. Mencione el ahorro real en términos concretos\n4. Invite a ver el checklist de preparación\n5. Sea empático con la decisión del paciente (es una cirugía, no una compra de producto)\n\nREGLAS:\n- ${langInstruction}\n- Máximo 8 líneas\n- Formato WhatsApp (*negritas* para ciudad ganadora y cifras clave)\n- Termina mencionando que puede escribir *checklist* para ver la lista de preparación\n- NO uses emojis excesivos — máximo 3 emojis en todo el mensaje`;\n\n  userContent = `Procedimiento: ${procedure}, mejor destino: ${best?.destination_city}`;\n  maxTokens = 350;\n\n// ─── exploring ───────────────────────────────────────────────\n} else if (state === 'exploring') {\n  const templateText = motor.responseText || '';\n\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente quiere explorar destinos de turismo médico para: ${procedure || 'un procedimiento médico'}\n\nEl sistema generó este listado base de destinos:\n---\n${templateText}\n---\n\nTAREA: Mantén todos los datos del listado pero mejora el texto que lo precede y lo sucede:\n1. Abre con 1-2 líneas de contexto personalizado para este procedimiento\n2. Incluye el listado exacto (no lo modifiques)\n3. Cierra con una llamada a la acción natural para ingresar cotizaciones reales\n\n${langInstruction} Máximo 3 líneas antes del listado, 2 líneas después.`;\n\n  userContent = `Procedimiento: ${procedure}`;\n  maxTokens = 500;\n\n// ─── has_quotes_check ─────────────────────────────────────────\n} else if (state === 'has_quotes_check') {\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente llega a ATLAS (probablemente con cotizaciones para ${procedure || 'un procedimiento médico'}).\n\nTAREA: Escribe un mensaje de bienvenida breve (2-3 líneas) que:\n1. Lo salude por nombre si disponible: ${fn || '(sin nombre)'}\n2. Le explique brevemente qué hace ATLAS (costo total real = procedimiento + vuelo + hotel + recuperación)\n3. Le pregunte si ya tiene cotizaciones de médicos (con las 2 opciones numéricas)\n\nFormato WhatsApp. ${langInstruction}`;\n\n  userContent = `Procedimiento: ${procedure || 'desconocido'}, usuario: ${fn || 'paciente'}`;\n  maxTokens = 200;\n\n// ─── checklist_shown ─────────────────────────────────────────\n} else if (state === 'checklist_shown') {\n  // FIX #4: cuando llega de SAGE sin cotizaciones, personalizar el mensaje\n  // para que reconozca el contexto y no parezca que ignoró el pedido del usuario.\n  const hasExistingQuotes = (atlasCtx.quotes || []).length > 0;\n  const hasSageProcedure  = !!(sageCtx.procedure_name);\n\n  if (!hasExistingQuotes && hasSageProcedure) {\n    // Usuario llegó desde SAGE con procedimiento específico pero sin cotizaciones.\n    // El motor ya generó el mensaje de bienvenida con \"¿tienes cotizaciones? 1 o 2\".\n    // Claude lo personaliza para que tenga contexto del procedimiento de SAGE.\n    const templateText = motor.responseText || '';\n    systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente llegó porque quiere comparar destinos para: *${procedure || sageCtx.procedure_name}*\nSu solicitud ya fue preparada por SAGE. Aún no tiene cotizaciones de médicos.\n\nEl sistema generó este mensaje base:\n---\n${templateText}\n---\n\nTAREA: Personaliza este mensaje para que:\n1. Reconozca brevemente que vienen con su solicitud de *${sageCtx.procedure_name}* lista\n2. Explique en 1 línea que para el análisis completo necesitan cotizaciones reales de médicos\n3. Ofrezca las 2 opciones de forma clara: ver comparación real (cuando tengan cotizaciones) o explorar panorama de destinos ahora\n4. Sea empático y motivador — ya dieron un gran paso al preparar la solicitud\n\n${langInstruction}\nMáximo 6 líneas. Formato WhatsApp (*negritas*).\nTermina con: \"¿Ya tienes cotizaciones de médicos? Escribe *1* para sí o *2* para explorar destinos.\" (en el idioma del usuario)\nResponde SOLO con el texto del mensaje, sin JSON.`;\n\n    userContent = `Procedure: ${sageCtx.procedure_name}, existing_quotes: 0`;\n    maxTokens   = 250;\n  } else {\n    // Tiene cotizaciones o no viene de SAGE — saltar NLG\n    return [{ json: { ...motor, _nlgSkip: true, _nlgReason: 'has_quotes_check_skip' }}];\n  }\n\n} else if (state === 'checklist_shown') {\n  const bestDest     = atlasCtx.best_destination || '';\n  const baseChecklist = motor.responseText || '';\n\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente va a viajar a ${bestDest} para realizarse: ${procedure || 'un procedimiento médico'}\n\nEl sistema generó este checklist base:\n---\n${baseChecklist}\n---\n\nTAREA: Mantén el checklist intacto pero añade 2-3 líneas de comentario personal ANTES del checklist, destacando los 2 items más críticos para este procedimiento específico.\n\n${langInstruction} Conciso y tranquilizador.`;\n\n  userContent = `Destino: ${bestDest}, procedimiento: ${procedure}`;\n  maxTokens = 500;\n}\n\nreturn [{ json: {\n  ...motor,\n  _nlgSkip: false,\n  _nlgState: state,\n  claudeAtlasPayload: {\n    model: 'claude-sonnet-4-20250514',\n    max_tokens: maxTokens,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userContent }]\n  }\n}}];\n"
+        "jsCode": "// ============================================================\n// PREPARAR NLG ATLAS v1.0 — Paso 4\n// Inserta entre Motor y Construir Respuesta Final.\n// Claude Sonnet hace narrativa de análisis más rica y personal.\n// ============================================================\nconst raw   = $input.first().json;\nconst motor = raw._phi_clean || raw;\n\nconst atlasCtx = motor.newAtlasContext || {};\nconst state    = atlasCtx.state || '';\nconst LANG     = motor.detectedLanguage || motor.userLanguage || 'es';\nconst fn       = motor.userName ? motor.userName.split(' ')[0] : null;\nconst nm       = fn ? ` ${fn}` : '';\nconst sageCtx  = motor.inputContext?.sage || {};\nconst procedure = sageCtx.procedure_name || atlasCtx.procedure_type || '';\n\nconst LANG_NAMES = { es: 'español', en: 'English', pt: 'português' };\nconst langInstruction = LANG === 'es'\n  ? 'Responde SIEMPRE en español.'\n  : LANG === 'en'\n  ? 'Always respond in English.'\n  : 'Responda SEMPRE em português.';\n\n// States where Claude adds real value\nconst CLAUDE_STATES = ['comparison_done', 'exploring', 'has_quotes_check', 'checklist_shown', 'analyzing'];\nif (!CLAUDE_STATES.includes(state)) {\n  return [{ json: { ...raw, _nlgSkip: true, _nlgReason: `skip_state:${state}` } }];\n}\n\nconst usd = (n) => `$${parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:0})} USD`;\n\nlet systemPrompt = '';\nlet userContent  = '';\nlet maxTokens    = 450;\n\n// ─── comparison_done ────────────────────────────────────────\nif (state === 'comparison_done' || state === 'analyzing') {\n  const analysis = atlasCtx.analysis || [];\n  const best     = analysis[0];\n\n  const analysisStr = analysis.map((a, i) => {\n    const medals = ['🥇','🥈','🥉'];\n    return `${medals[i]||`${i+1}.`} ${a.destination_city}, ${a.destination_country}: procedimiento ${usd(a.procedure_cost)} + vuelo ${usd(a.flightCost)} + hotel ${usd(a.hotelCost)} (${a.recDays} noches) = TOTAL ${usd(a.totalCost)}`;\n  }).join('\\n');\n\n  const saving = analysis.length > 1\n    ? analysis[analysis.length-1].totalCost - analysis[0].totalCost\n    : 0;\n\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi. Tu especialidad: ayudar a pacientes a tomar la mejor decisión sobre dónde realizarse un procedimiento médico.\n${langInstruction}\n\nPROCEDIMIENTO DEL PACIENTE: ${procedure || 'procedimiento médico'}\nUSUARIO: ${fn || 'paciente'}\n\nANÁLISIS DE DESTINOS:\n${analysisStr}\n\n${saving > 0 ? `El destino más económico ahorra ${usd(saving)} vs el más caro.` : ''}\n\nTAREA: Escribe un análisis narrativo que:\n1. Presente el destino ganador con entusiasmo fundamentado (no solo precio)\n2. Explique brevemente POR QUÉ ese destino es la mejor opción para este procedimiento específico\n3. Mencione el ahorro real en términos concretos\n4. Invite a ver el checklist de preparación\n5. Sea empático con la decisión del paciente (es una cirugía, no una compra de producto)\n\nREGLAS:\n- ${langInstruction}\n- Máximo 8 líneas\n- Formato WhatsApp (*negritas* para ciudad ganadora y cifras clave)\n- Termina mencionando que puede escribir *checklist* para ver la lista de preparación\n- NO uses emojis excesivos — máximo 3 emojis en todo el mensaje`;\n\n  userContent = `Procedimiento: ${procedure}, mejor destino: ${best?.destination_city}`;\n  maxTokens = 350;\n\n// ─── exploring ───────────────────────────────────────────────\n} else if (state === 'exploring') {\n  const templateText = motor.responseText || '';\n\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente quiere explorar destinos de turismo médico para: ${procedure || 'un procedimiento médico'}\n\nEl sistema generó este listado base de destinos:\n---\n${templateText}\n---\n\nTAREA: Mantén todos los datos del listado pero mejora el texto que lo precede y lo sucede:\n1. Abre con 1-2 líneas de contexto personalizado para este procedimiento\n2. Incluye el listado exacto (no lo modifiques)\n3. Cierra con una llamada a la acción natural para ingresar cotizaciones reales\n\n${langInstruction} Máximo 3 líneas antes del listado, 2 líneas después.`;\n\n  userContent = `Procedimiento: ${procedure}`;\n  maxTokens = 500;\n\n// ─── has_quotes_check ─────────────────────────────────────────\n} else if (state === 'has_quotes_check') {\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente llega a ATLAS (probablemente con cotizaciones para ${procedure || 'un procedimiento médico'}).\n\nTAREA: Escribe un mensaje de bienvenida breve (2-3 líneas) que:\n1. Lo salude por nombre si disponible: ${fn || '(sin nombre)'}\n2. Le explique brevemente qué hace ATLAS (costo total real = procedimiento + vuelo + hotel + recuperación)\n3. Le pregunte si ya tiene cotizaciones de médicos (con las 2 opciones numéricas)\n\nFormato WhatsApp. ${langInstruction}`;\n\n  userContent = `Procedimiento: ${procedure || 'desconocido'}, usuario: ${fn || 'paciente'}`;\n  maxTokens = 200;\n\n// ─── checklist_shown ─────────────────────────────────────────\n} else if (state === 'checklist_shown') {\n  // FIX #4: cuando llega de SAGE sin cotizaciones, personalizar el mensaje\n  // para que reconozca el contexto y no parezca que ignoró el pedido del usuario.\n  const hasExistingQuotes = (atlasCtx.quotes || []).length > 0;\n  const hasSageProcedure  = !!(sageCtx.procedure_name);\n\n  if (!hasExistingQuotes && hasSageProcedure) {\n    // Usuario llegó desde SAGE con procedimiento específico pero sin cotizaciones.\n    // El motor ya generó el mensaje de bienvenida con \"¿tienes cotizaciones? 1 o 2\".\n    // Claude lo personaliza para que tenga contexto del procedimiento de SAGE.\n    const templateText = motor.responseText || '';\n    systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente llegó porque quiere comparar destinos para: *${procedure || sageCtx.procedure_name}*\nSu solicitud ya fue preparada por SAGE. Aún no tiene cotizaciones de médicos.\n\nEl sistema generó este mensaje base:\n---\n${templateText}\n---\n\nTAREA: Personaliza este mensaje para que:\n1. Reconozca brevemente que vienen con su solicitud de *${sageCtx.procedure_name}* lista\n2. Explique en 1 línea que para el análisis completo necesitan cotizaciones reales de médicos\n3. Ofrezca las 2 opciones de forma clara: ver comparación real (cuando tengan cotizaciones) o explorar panorama de destinos ahora\n4. Sea empático y motivador — ya dieron un gran paso al preparar la solicitud\n\n${langInstruction}\nMáximo 6 líneas. Formato WhatsApp (*negritas*).\nTermina con: \"¿Ya tienes cotizaciones de médicos? Escribe *1* para sí o *2* para explorar destinos.\" (en el idioma del usuario)\nResponde SOLO con el texto del mensaje, sin JSON.`;\n\n    userContent = `Procedure: ${sageCtx.procedure_name}, existing_quotes: 0`;\n    maxTokens   = 250;\n  } else {\n    // Tiene cotizaciones o no viene de SAGE — saltar NLG\n    return [{ json: { ...raw, _nlgSkip: true, _nlgReason: 'has_quotes_check_skip' }}];\n  }\n\n} else if (state === 'checklist_shown') {\n  const bestDest     = atlasCtx.best_destination || '';\n  const baseChecklist = motor.responseText || '';\n\n  systemPrompt = `Eres ATLAS, consejero de turismo médico de Pangi.\n${langInstruction}\n\nEl paciente va a viajar a ${bestDest} para realizarse: ${procedure || 'un procedimiento médico'}\n\nEl sistema generó este checklist base:\n---\n${baseChecklist}\n---\n\nTAREA: Mantén el checklist intacto pero añade 2-3 líneas de comentario personal ANTES del checklist, destacando los 2 items más críticos para este procedimiento específico.\n\n${langInstruction} Conciso y tranquilizador.`;\n\n  userContent = `Destino: ${bestDest}, procedimiento: ${procedure}`;\n  maxTokens = 500;\n}\n\nreturn [{ json: {\n  ...raw,\n  _nlgSkip: false,\n  _nlgState: state,\n  claudeAtlasPayload: {\n    model: 'claude-sonnet-4-20250514',\n    max_tokens: maxTokens,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userContent }]\n  }\n}}];\n"
       },
       "id": "b4876dbb-b073-4d80-af36-8f200d80ed00",
       "name": "📦 Preparar — NLG ATLAS",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -208,
-        -208
+        -1248,
+        432
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
+        "url": "http://127.0.0.1:4000/v1/messages",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "anthropicApi",
         "sendHeaders": true,
@@ -209,8 +209,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        32,
-        -208
+        -720,
+        224
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -234,9 +234,94 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        272,
-        -208
+        -400,
+        448
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// 🔐 Strip PHI v1.0\n// Elimina identificadores personales antes de llamar a Claude.\n// PHI eliminado: userName, userPhone, claudeContext.userName\n// Datos completos preservados en el payload principal para\n// nodos downstream (WhatsApp, DB, Construir Respuesta Final).\n// ============================================================\nconst inp = $input.first().json;\n\nconst phiClean = {\n  ...inp,\n  userName:  null,\n  userPhone: null,\n  ...(inp.claudeContext\n    ? { claudeContext: { ...inp.claudeContext, userName: null } }\n    : {})\n};\n\n// _phi_clean excluye también remoteJid e instance\nconst { remoteJid, instance, userPhone, ...clinicalOnly } = phiClean;\n\nreturn [{ json: {\n  ...inp,              // datos completos para nodos posteriores\n  phi_stripped: true,\n  _phi_clean: {\n    ...clinicalOnly,   // solo datos clínicos para Claude\n    userName:  null,\n    userPhone: null\n  }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -16
+      ],
+      "id": "e87ec46f-c8ca-4587-bcc6-6f7bd610a589",
+      "name": "🔐 Strip PHI"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26193916-32e7-4c30-a846-ca70e63d80a6",
+              "leftValue": "={{ $json._nlgSkip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1040,
+        432
+      ],
+      "id": "17cbf24f-6e62-4497-8e2b-5775dcd4e14c",
+      "name": "✅ ¿NLG Activo?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prepData    = $('📦 Preparar — NLG ATLAS').first().json;\nconst claudeResp  = $input.first().json;\n\nconst sessionId    = prepData.sessionId || 'unknown';\nconst state        = prepData._nlgState || 'unknown';\nconst language     = prepData.detectedLanguage || prepData.userLanguage || 'es';\nconst model        = prepData.claudeAtlasPayload?.model || 'claude-sonnet-4-20250514';\nconst inputTokens  = claudeResp?.usage?.input_tokens  || 0;\nconst outputTokens = claudeResp?.usage?.output_tokens || 0;\nconst outputText   = claudeResp?.content?.[0]?.text   || '';\n\nconst PRICES = {\n  'claude-sonnet-4-20250514':  { in: 3.00, out: 15.00 },\n  'claude-haiku-4-5-20251001': { in: 0.80, out: 4.00  }\n};\nconst p       = PRICES[model] || PRICES['claude-sonnet-4-20250514'];\nconst costUsd = ((inputTokens * p.in) + (outputTokens * p.out)) / 1_000_000;\nconst now     = new Date().toISOString();\nconst ts      = Date.now();\n\nreturn [{ json: {\n  _langfusePayload: {\n    batch: [\n      {\n        id:        `trace-${sessionId}-${ts}`,\n        type:      'trace-create',\n        timestamp: now,\n        body: {\n          id:       `pangi-${sessionId}`,\n          name:     `pangi-session-${sessionId}`,\n          metadata: { session_id: sessionId, language, phi_stripped: prepData.phi_stripped || false }\n        }\n      },\n      {\n        id:        `atlas-${sessionId}-${ts}`,\n        type:      'generation-create',\n        timestamp: now,\n        body: {\n          id:        `gen-atlas-${sessionId}-${ts}`,\n          traceId:   `pangi-${sessionId}`,\n          name:      `atlas-${state}`,\n          model,\n          startTime: now,\n          endTime:   now,\n          input:  { prompt: (prepData.claudeAtlasPayload?.system || '').substring(0, 800) },\n          output: { text: outputText.substring(0, 500) },\n          usage:  { input: inputTokens, output: outputTokens, unit: 'TOKENS' },\n          metadata: {\n            agent:        'ATLAS',\n            state,\n            language,\n            session_id:   sessionId,\n            phi_stripped: prepData.phi_stripped || false,\n            cost_usd:     parseFloat(costUsd.toFixed(6))\n          }\n        }\n      }\n    ]\n  }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        224
+      ],
+      "id": "cb379c1a-3f25-455c-926d-d1f24e511237",
+      "name": "📊 Langfuse — ATLAS"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us.cloud.langfuse.com/api/public/ingestion",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._langfusePayload) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -176,
+        224
+      ],
+      "id": "a27d5129-ede7-4bac-8688-80bc2f7bd71e",
+      "name": "📤 Langfuse — Enviar (ATLAS)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "AFoErPLi59IsLVhK",
+          "name": "Langfuse — Pangi"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -329,7 +414,7 @@
       "main": [
         [
           {
-            "node": "📦 Preparar — NLG ATLAS",
+            "node": "🔐 Strip PHI",
             "type": "main",
             "index": 0
           }
@@ -340,7 +425,7 @@
       "main": [
         [
           {
-            "node": "☁️ Claude NLG — ATLAS Sonnet",
+            "node": "✅ ¿NLG Activo?",
             "type": "main",
             "index": 0
           }
@@ -352,6 +437,11 @@
         [
           {
             "node": "🔧 Procesar — NLG ATLAS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊 Langfuse — ATLAS",
             "type": "main",
             "index": 0
           }
@@ -368,13 +458,53 @@
           }
         ]
       ]
+    },
+    "🔐 Strip PHI": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — NLG ATLAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿NLG Activo?": {
+      "main": [
+        [
+          {
+            "node": "☁️ Claude NLG — ATLAS Sonnet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔧 Procesar — NLG ATLAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Langfuse — ATLAS": {
+      "main": [
+        [
+          {
+            "node": "📤 Langfuse — Enviar (ATLAS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "abadcf71-ae79-44fb-8e96-ab44aa6e265f",
+  "versionId": "8414a5e6-1417-423e-9dac-d4bced46e806",
   "meta": {
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
   },

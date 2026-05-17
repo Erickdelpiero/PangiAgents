@@ -52,8 +52,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        416,
-        48
+        432,
+        208
       ]
     },
     {
@@ -65,8 +65,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        864,
-        -144
+        736,
+        48
       ]
     },
     {
@@ -78,7 +78,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        848,
+        736,
         224
       ]
     },
@@ -99,21 +99,21 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// PREPARAR CLAUDE NLG NOVA v1.0\n// Solo invocado cuando claudeSkip=false.\n// Construye el prompt personalizado según la acción de NOVA.\n// ============================================================\nconst motorOut = $input.first().json;\n\n// Si claudeSkip=true → no debería llegar aquí (lo filtra el IF)\n// pero por seguridad retornamos con flag\nif (motorOut.claudeSkip) {\n  return [{ json: { ...motorOut, _nlgSkip: true } }];\n}\n\nconst { claudeAction, claudeContext, responseText } = motorOut;\nconst lang     = claudeContext?.lang || 'es';\nconst userName = claudeContext?.userName || null;\nconst userMsg  = claudeContext?.userMessage || '';\nconst nm       = userName ? ` ${userName}` : '';\n\nconst LANG_NAMES = { es: 'español', en: 'inglés', pt: 'portugués' };\nconst langName = LANG_NAMES[lang] || 'español';\n\n// Instrucciones específicas por tipo de acción\nconst ACTION_PROMPTS = {\n  handoff_sage: `El usuario quiere cotizar un procedimiento médico. Escribe un mensaje breve (máx 3 líneas) que:\n1. Lo conecte con SAGE (especialista en cotizaciones de Pangi)\n2. Mencione específicamente el procedimiento si puedes inferirlo del mensaje\n3. Sea cálido e inspire confianza — es el inicio de la conversación\nTono: cálido, eficiente. NO hagas preguntas. NO digas que \"ya tienes su información\".`,\n\n  handoff_atlas: `El usuario quiere comparar destinos médicos o calcular el costo total de un viaje. Escribe un mensaje breve (máx 3 líneas) que:\n1. Lo conecte con ATLAS (consejero de turismo médico de Pangi)\n2. Mencione que ATLAS calculará vuelo + alojamiento + procedimiento\n3. Genere entusiasmo por explorar opciones\nTono: entusiasta, conciso. NO hagas preguntas.`,\n\n  ask_city: `El usuario quiere agendar una cita médica. Escribe un mensaje breve (máx 2 líneas) que le pregunte naturalmente en qué ciudad necesita la cita. Tono: amigable y directo.`,\n\n  fallback: `El usuario escribió algo que no está 100% claro. Escribe un mensaje breve (máx 3 líneas) que:\n1. Muestre que entendiste parcialmente (si aplica)\n2. Le ofrezca las 3 opciones de Pangi: cotizar, comparar destinos, agendar\n3. Sea orientador, no confuso\nTono: paciente y servicial. USA emojis mínimos (💰🗺️🗓️).`\n};\n\nconst actionPrompt = ACTION_PROMPTS[claudeAction] || ACTION_PROMPTS.fallback;\n\nconst systemPrompt = `Eres NOVA, la asistente de bienvenida de Pangi (plataforma de turismo médico latinoamericana).\n\nREGLAS ABSOLUTAS:\n- Responde SIEMPRE en ${langName}\n- Usa el nombre del usuario si está disponible: \"${userName || 'no disponible'}\"\n- Máximo 3-4 líneas de texto\n- Formato WhatsApp: usa *negritas* con asteriscos para énfasis\n- NO uses markdown como ##, **, etc.\n- NO hagas preguntas en mensajes de handoff\n- Genera SOLO el mensaje final, sin explicaciones\n\nTAREA: ${actionPrompt}`;\n\nreturn [{ json: {\n  ...motorOut,\n  _nlgSkip: false,\n  claudeNlgPayload: {\n    model: 'claude-haiku-4-5-20251001',\n    max_tokens: 200,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: `El usuario escribió: \"${userMsg}\"` }]\n  }\n}}];"
+        "jsCode": "// ============================================================\n// PREPARAR CLAUDE NLG NOVA v1.0\n// Solo invocado cuando claudeSkip=false.\n// Construye el prompt personalizado según la acción de NOVA.\n// ============================================================\nconst raw      = $input.first().json;\nconst motorOut = raw._phi_clean || raw;          // ← declarar PRIMERO\n\nif (motorOut.claudeSkip) {                        // ← luego usar\n  return [{ json: { ...raw, _nlgSkip: true } }];\n}\n\nconst { claudeAction, claudeContext, responseText } = motorOut;\nconst userName = null; // PHI_STRIP\n\nconst lang     = claudeContext?.lang || 'es';\nconst userMsg  = claudeContext?.userMessage || '';\nconst nm       = userName ? ` ${userName}` : '';\n\nconst LANG_NAMES = { es: 'español', en: 'inglés', pt: 'portugués' };\nconst langName = LANG_NAMES[lang] || 'español';\n\n// Instrucciones específicas por tipo de acción\nconst ACTION_PROMPTS = {\n  handoff_sage: `El usuario quiere cotizar un procedimiento médico. Escribe un mensaje breve (máx 3 líneas) que:\n1. Lo conecte con SAGE (especialista en cotizaciones de Pangi)\n2. Mencione específicamente el procedimiento si puedes inferirlo del mensaje\n3. Sea cálido e inspire confianza — es el inicio de la conversación\nTono: cálido, eficiente. NO hagas preguntas. NO digas que \"ya tienes su información\".`,\n\n  handoff_atlas: `El usuario quiere comparar destinos médicos o calcular el costo total de un viaje. Escribe un mensaje breve (máx 3 líneas) que:\n1. Lo conecte con ATLAS (consejero de turismo médico de Pangi)\n2. Mencione que ATLAS calculará vuelo + alojamiento + procedimiento\n3. Genere entusiasmo por explorar opciones\nTono: entusiasta, conciso. NO hagas preguntas.`,\n\n  ask_city: `El usuario quiere agendar una cita médica. Escribe un mensaje breve (máx 2 líneas) que le pregunte naturalmente en qué ciudad necesita la cita. Tono: amigable y directo.`,\n\n  fallback: `El usuario escribió algo que no está 100% claro. Escribe un mensaje breve (máx 3 líneas) que:\n1. Muestre que entendiste parcialmente (si aplica)\n2. Le ofrezca las 3 opciones de Pangi: cotizar, comparar destinos, agendar\n3. Sea orientador, no confuso\nTono: paciente y servicial. USA emojis mínimos (💰🗺️🗓️).`\n};\n\nconst actionPrompt = ACTION_PROMPTS[claudeAction] || ACTION_PROMPTS.fallback;\n\nconst systemPrompt = `Eres NOVA, la asistente de bienvenida de Pangi (plataforma de turismo médico latinoamericana).\n\nREGLAS ABSOLUTAS:\n- Responde SIEMPRE en ${langName}\n- Máximo 3-4 líneas de texto\n- Formato WhatsApp: usa *negritas* con asteriscos para énfasis\n- NO uses markdown como ##, **, etc.\n- NO hagas preguntas en mensajes de handoff\n- Genera SOLO el mensaje final, sin explicaciones\n\nTAREA: ${actionPrompt}`;\n\nreturn [{ json: {\n  ...raw,\n  _nlgSkip: false,\n  claudeNlgPayload: {\n    model: 'claude-haiku-4-5-20251001',\n    max_tokens: 200,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: `El usuario escribió: \"${userMsg}\"` }]\n  }\n}}];"
       },
       "id": "a0ac3c2d-695c-47ff-9f82-600da412a33f",
       "name": "📦 Preparar — NLG NOVA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -320,
-        256
+        -144,
+        64
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
+        "url": "http://127.0.0.1:4000/v1/messages",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "anthropicApi",
         "sendHeaders": true,
@@ -142,8 +142,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        -80,
-        256
+        -480,
+        304
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -167,8 +167,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        160,
-        256
+        192,
+        496
       ]
     },
     {
@@ -257,6 +257,91 @@
         160,
         -160
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// 🔐 Strip PHI v1.0\n// Elimina identificadores personales antes de llamar a Claude.\n// PHI eliminado: userName, userPhone, claudeContext.userName\n// Datos completos preservados en el payload principal para\n// nodos downstream (WhatsApp, DB, Construir Respuesta Final).\n// ============================================================\nconst inp = $input.first().json;\n\nconst phiClean = {\n  ...inp,\n  userName:  null,\n  userPhone: null,\n  ...(inp.claudeContext\n    ? { claudeContext: { ...inp.claudeContext, userName: null } }\n    : {})\n};\n\n// _phi_clean excluye también remoteJid e instance\nconst { remoteJid, instance, userPhone, ...clinicalOnly } = phiClean;\n\nreturn [{ json: {\n  ...inp,              // datos completos para nodos posteriores\n  phi_stripped: true,\n  _phi_clean: {\n    ...clinicalOnly,   // solo datos clínicos para Claude\n    userName:  null,\n    userPhone: null\n  }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        64
+      ],
+      "id": "17e55020-b58b-4486-bc68-66444f43bd38",
+      "name": "🔐 Strip PHI"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26193916-32e7-4c30-a846-ca70e63d80a6",
+              "leftValue": "={{ $json._nlgSkip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -752,
+        464
+      ],
+      "id": "95077070-731e-4c99-a43a-4948623135af",
+      "name": "✅ ¿NLG Activo?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prepData    = $('📦 Preparar — NLG NOVA').first().json;\nconst claudeResp  = $input.first().json;\n\nconst sessionId    = prepData.sessionId || 'unknown';\nconst action       = prepData.claudeAction || 'unknown';\nconst language     = prepData.detectedLanguage || prepData.userLanguage || 'es';\nconst model        = prepData.claudeNlgPayload?.model || 'claude-haiku-4-5-20251001';\nconst inputTokens  = claudeResp?.usage?.input_tokens  || 0;\nconst outputTokens = claudeResp?.usage?.output_tokens || 0;\nconst outputText   = claudeResp?.content?.[0]?.text   || '';\n\nconst PRICES = {\n  'claude-sonnet-4-20250514':  { in: 3.00, out: 15.00 },\n  'claude-haiku-4-5-20251001': { in: 0.80, out: 4.00  }\n};\nconst p       = PRICES[model] || PRICES['claude-haiku-4-5-20251001'];\nconst costUsd = ((inputTokens * p.in) + (outputTokens * p.out)) / 1_000_000;\nconst now     = new Date().toISOString();\nconst ts      = Date.now();\n\nreturn [{ json: {\n  _langfusePayload: {\n    batch: [\n      {\n        id:        `trace-${sessionId}-${ts}`,\n        type:      'trace-create',\n        timestamp: now,\n        body: {\n          id:       `pangi-${sessionId}`,\n          name:     `pangi-session-${sessionId}`,\n          metadata: { session_id: sessionId, language, phi_stripped: prepData.phi_stripped || false }\n        }\n      },\n      {\n        id:        `nova-${sessionId}-${ts}`,\n        type:      'generation-create',\n        timestamp: now,\n        body: {\n          id:        `gen-nova-${sessionId}-${ts}`,\n          traceId:   `pangi-${sessionId}`,\n          name:      `nova-${action}`,\n          model,\n          startTime: now,\n          endTime:   now,\n          input:  { prompt: (prepData.claudeNlgPayload?.system || '').substring(0, 800) },\n          output: { text: outputText.substring(0, 500) },\n          usage:  { input: inputTokens, output: outputTokens, unit: 'TOKENS' },\n          metadata: {\n            agent:        'NOVA',\n            action,\n            language,\n            session_id:   sessionId,\n            phi_stripped: prepData.phi_stripped || false,\n            cost_usd:     parseFloat(costUsd.toFixed(6))\n          }\n        }\n      }\n    ]\n  }\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        304
+      ],
+      "id": "a4a68ad2-9d31-4268-bf84-37e3a685b847",
+      "name": "📊 Langfuse — NOVA"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us.cloud.langfuse.com/api/public/ingestion",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._langfusePayload) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        176,
+        304
+      ],
+      "id": "e9891ff1-a07d-4511-b1d6-d0fc4e4ee7df",
+      "name": "📤 Langfuse — Enviar (NOVA)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "AFoErPLi59IsLVhK",
+          "name": "Langfuse — Pangi"
+        }
+      }
     }
   ],
   "pinData": {
@@ -330,7 +415,7 @@
       "main": [
         [
           {
-            "node": "☁️ Claude NLG — NOVA Haiku",
+            "node": "✅ ¿NLG Activo?",
             "type": "main",
             "index": 0
           }
@@ -342,6 +427,11 @@
         [
           {
             "node": "🔧 Procesar — NLG NOVA",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊 Langfuse — NOVA",
             "type": "main",
             "index": 0
           }
@@ -381,7 +471,7 @@
         ],
         [
           {
-            "node": "📦 Preparar — NLG NOVA",
+            "node": "🔐 Strip PHI",
             "type": "main",
             "index": 0
           }
@@ -420,13 +510,53 @@
           }
         ]
       ]
+    },
+    "🔐 Strip PHI": {
+      "main": [
+        [
+          {
+            "node": "📦 Preparar — NLG NOVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿NLG Activo?": {
+      "main": [
+        [
+          {
+            "node": "☁️ Claude NLG — NOVA Haiku",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔧 Procesar — NLG NOVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Langfuse — NOVA": {
+      "main": [
+        [
+          {
+            "node": "📤 Langfuse — Enviar (NOVA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "4cd89a54-686e-49de-a7d1-bbdacd26eec0",
+  "versionId": "635e8de1-87cc-408d-ac5f-7c1166bd4495",
   "meta": {
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
   },
