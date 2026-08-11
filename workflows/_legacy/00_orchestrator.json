@@ -7,13 +7,13 @@
         "path": "pangi-whatsapp-dev",
         "options": {}
       },
-      "id": "e5f7cb67-83c8-4223-8a7f-abd26863c497",
+      "id": "83a486f9-7d43-43a4-b4fa-296f1fc7bd57",
       "name": "🌐 Webhook — Evolution API",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        -3568,
-        -336
+        -1360,
+        -1216
       ],
       "webhookId": "70e718c1-ffd3-4777-ba7a-7132acb14d21"
     },
@@ -21,13 +21,13 @@
       "parameters": {
         "jsCode": "// ============================================================\n// PANGI ORCHESTRATOR — Message Extractor v1.0.0\n// Compatible con Evolution API V2 webhook payload.\n// ============================================================\n\nconst body = $input.first().json.body || $input.first().json;\nconst event = body.event;\nconst instance = body.instance || 'Test1';\nconst data = body.data;\n\n// Solo procesamos mensajes reales\nif (event !== 'messages.upsert') {\n  return [{ json: { valid: false, reason: 'not_message_event', event } }];\n}\nif (!data) {\n  return [{ json: { valid: false, reason: 'no_data_field' } }];\n}\n\nconst key          = data.key || {};\n// Evolution API V2 puede enviar remoteJid en formato @lid (nuevo formato WhatsApp).\n// remoteJidAlt contiene el JID tradicional @s.whatsapp.net que Evolution puede usar.\n// Priorizamos el formato tradicional para compatibilidad con sendText.\nconst remoteJid = key.remoteJidAlt || key.remoteJid || '';\nconst fromMe       = key.fromMe   || false;\nconst messageId    = key.id       || '';\nconst pushName     = data.pushName || null;\nconst timestamp    = data.messageTimestamp || Math.floor(Date.now() / 1000);\n\n// ── FILTROS ───────────────────────────────────────────────\n// Ignorar mensajes propios (enviados por el bot)\nif (fromMe)  return [{ json: { valid: false, reason: 'from_me', remoteJid } }];\n// Ignorar grupos\nif (remoteJid.endsWith('@g.us')) return [{ json: { valid: false, reason: 'group_message' } }];\n// Ignorar estados de WhatsApp\nif (remoteJid === 'status@broadcast') return [{ json: { valid: false, reason: 'status_broadcast' } }];\n// Ignorar mensajes vacíos de notificación\nif (!remoteJid) return [{ json: { valid: false, reason: 'no_remote_jid' } }];\n\n// ── LIMPIAR NÚMERO DE TELÉFONO ─────────────────────────────\nconst phone = '+' + remoteJid\n  .replace('@s.whatsapp.net','')\n  .replace('@c.us','')\n  .replace('@lid','')\n  .replace(/@[^@]+$/,''); // catch-all para cualquier sufijo futuro\n\n// ── EXTRAER CONTENIDO DEL MENSAJE ─────────────────────────\nconst msg = data.message || {};\nlet messageText = '';\nlet messageType = 'unknown';\n\nif (msg.conversation) {\n  messageText = msg.conversation;\n  messageType = 'text';\n} else if (msg.extendedTextMessage?.text) {\n  messageText = msg.extendedTextMessage.text;\n  messageType = 'text';\n} else if (msg.buttonsResponseMessage?.selectedButtonId) {\n  // Respuesta de botón clásico\n  messageText = msg.buttonsResponseMessage.selectedButtonId;\n  messageType = 'button_reply';\n} else if (msg.listResponseMessage?.singleSelectReply?.selectedRowId) {\n  // Respuesta de lista\n  messageText = msg.listResponseMessage.singleSelectReply.selectedRowId;\n  messageType = 'button_reply';\n} else if (msg.interactiveResponseMessage?.nativeFlowResponseMessage) {\n  // Respuesta interactiva (botones nativos WhatsApp)\n  try {\n    const params = JSON.parse(msg.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson || '{}');\n    messageText = params.id || params.title || '';\n    messageType = 'button_reply';\n  } catch(e) { messageText = ''; messageType = 'button_reply'; }\n} else if (msg.imageMessage) {\n  messageText = msg.imageMessage.caption || '[Imagen recibida]';\n  messageType = 'image';\n} else if (msg.audioMessage || msg.pttMessage) {\n  messageText = '[Audio recibido — función de voz próximamente]';\n  messageType = 'audio';\n} else if (msg.documentMessage) {\n  messageText = `[Documento recibido: ${msg.documentMessage.fileName || 'archivo'}]`;\n  messageType = 'document';\n} else if (msg.stickerMessage) {\n  messageText = '[Sticker]';\n  messageType = 'sticker';\n}\n\n// Sin contenido reconocible\nif (!messageText) {\n  return [{ json: { valid: false, reason: 'unsupported_or_empty_message', remoteJid, msgKeys: Object.keys(msg) } }];\n}\n\nreturn [{ json: {\n  valid: true,\n  phone,\n  remoteJid,\n  pushName,\n  messageText,\n  messageType,\n  messageId,\n  instance,\n  timestamp: new Date(timestamp * 1000).toISOString()\n}}];"
       },
-      "id": "3b48b5ec-923f-4395-be20-07bfe9ff9b97",
+      "id": "bc20b9fb-da51-45be-b7bc-a61b8653a8a5",
       "name": "🔎 Extraer y Validar Mensaje",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3328,
-        -336
+        -1120,
+        -1216
       ]
     },
     {
@@ -53,26 +53,26 @@
         },
         "options": {}
       },
-      "id": "4424527a-0f60-43cd-9051-490a4322a28d",
+      "id": "be7d0d1b-7d2e-4852-83da-79b1fab00714",
       "name": "✅ ¿Mensaje Procesable?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -3088,
-        -336
+        -880,
+        -1216
       ]
     },
     {
       "parameters": {
         "jsCode": "const msg = $('🔎 Extraer y Validar Mensaje').first().json;\nreturn [{ json: {\n  operation: 'getOrCreateUser',\n  params: {\n    phone:    msg.phone,\n    name:     msg.pushName || null,\n    language: 'es'\n  }\n}}];"
       },
-      "id": "9f7cdea9-130b-440c-be71-1bd116a8b037",
+      "id": "6d86f5e3-df3a-413f-89e2-1e61e9274998",
       "name": "📦 Payload — getOrCreateUser",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2848,
-        -448
+        -640,
+        -1328
       ]
     },
     {
@@ -80,26 +80,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "6721b5c8-7d45-41f9-b272-0f0fca3f37a0",
+      "id": "17f40ab3-5df2-47c7-aa9e-d614914c0570",
       "name": "🗄️ DB — Usuario",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -2608,
-        -448
+        -400,
+        -1328
       ]
     },
     {
       "parameters": {
         "jsCode": "const userId = $('🗄️ DB — Usuario').first().json.data[0].id;\nreturn [{ json: {\n  operation: 'getActiveSession',\n  params: { userId }\n}}];"
       },
-      "id": "f98ee3d8-3b15-46e2-8531-3a7ed75d794a",
+      "id": "1ee193e7-2648-41d9-955e-0e8e567737f0",
       "name": "📦 Payload — getActiveSession",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2368,
-        -448
+        -160,
+        -1328
       ]
     },
     {
@@ -107,13 +107,13 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "33f09ae2-367c-4d4e-875e-a2dc6c313ecb",
+      "id": "c5348c61-9c57-47a8-902b-cd545b0093ae",
       "name": "🗄️ DB — Sesión Activa",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -2528,
-        -128
+        -320,
+        -1008
       ]
     },
     {
@@ -141,39 +141,39 @@
         },
         "options": {}
       },
-      "id": "a573b043-cf59-43b1-b37f-63fe5d05a0dd",
+      "id": "43bc17c4-33e5-44ba-b523-d9099678f687",
       "name": "✅ ¿Sesión Existe?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -2288,
-        -128
+        -80,
+        -1008
       ]
     },
     {
       "parameters": {
         "jsCode": "// TRUE path: sesión activa encontrada en DB\nconst session  = $('🗄️ DB — Sesión Activa').first().json.data[0];\nconst userData = $('🗄️ DB — Usuario').first().json.data[0];\nconst msgData  = $('🔎 Extraer y Validar Mensaje').first().json;\n\n// Extraer context como variable para reutilizar en userLanguage\nconst sessionContext = typeof session.context === 'string'\n  ? JSON.parse(session.context || '{}')\n  : (session.context || {});\n\nreturn [{ json: {\n  userId:         userData.id,\n  userName:       userData.name || msgData.pushName || null,\n  userLanguage:   sessionContext.language || userData.language || 'es',\n  userPhone:      userData.phone,\n  sessionId:      session.id,\n  activeAgent:    session.active_agent,\n  sessionState:   session.state,\n  sessionContext,\n  isNewSession:   false,\n  messageText:    msgData.messageText,\n  messageType:    msgData.messageType,\n  remoteJid:      msgData.remoteJid,\n  instance:       msgData.instance\n}}];"
       },
-      "id": "bd917f68-e8f1-486c-ba2d-f62693b4b467",
+      "id": "2f44cc55-3034-4fc2-ae9e-59148269a3f9",
       "name": "🔧 Normalizar — Sesión Existente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1824,
-        -432
+        400,
+        -1312
       ]
     },
     {
       "parameters": {
         "jsCode": "// FALSE path: no hay sesión, la creamos con NOVA como agente inicial\nconst userId = $('🗄️ DB — Usuario').first().json.data[0].id;\nreturn [{ json: {\n  operation: 'createSession',\n  params: { userId, agent: 'NOVA', state: 'initial', context: {} }\n}}];"
       },
-      "id": "1dc3b68c-d93e-4a8b-b5a6-4c088a7e5904",
+      "id": "ae2a473f-616b-410f-b986-441a3fb3600c",
       "name": "📦 Payload — createSession",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2032,
-        -112
+        192,
+        -992
       ]
     },
     {
@@ -181,39 +181,39 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "e5a6bb80-8c43-45cd-bd40-dc9e992be7f0",
+      "id": "e548ab31-5bfd-4810-9c0c-665d5b62b705",
       "name": "🗄️ DB — Crear Sesión",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1792,
-        -112
+        432,
+        -992
       ]
     },
     {
       "parameters": {
         "jsCode": "// FALSE path: sesión recién creada (o recuperada por ON CONFLICT)\nconst sessionResult = $('🗄️ DB — Crear Sesión').first().json;\nconst session       = sessionResult.data?.[0];\nconst userData      = $('🗄️ DB — Usuario').first().json.data?.[0];\nconst msgData       = $('🔎 Extraer y Validar Mensaje').first().json;\n\n// Guard — si llegamos aquí sin sesión, hay un problema upstream no detectado\nif (!userData) {\n  throw new Error(\n    `[PANGI] USER_NOT_FOUND — remoteJid: ${msgData?.remoteJid ?? 'desconocido'}`\n  );\n}\nif (!session) {\n  // Con Fix 1 (ON CONFLICT) esto no debería ocurrir nunca.\n  // Si ocurre, significa que DB_MANAGER retornó success:false y llegó aquí igual.\n  throw new Error(\n    `[PANGI] SESSION_CREATE_FAILED — ` +\n    `userId: ${userData.id} | ` +\n    `error: ${sessionResult.error ?? 'unknown'} | ` +\n    `detail: ${sessionResult._meta?.pgDetail ?? sessionResult.message ?? 'sin detalle'}`\n  );\n}\n\nreturn [{ json: {\n  userId:         userData.id,\n  userName:       userData.name || msgData.pushName || null,\n  userLanguage:   userData.language || 'es',\n  userPhone:      userData.phone,\n  sessionId:      session.id,\n  activeAgent:    session.active_agent,\n  sessionState:   session.state,\n  sessionContext: typeof session.context === 'string'\n                    ? JSON.parse(session.context || '{}')\n                    : (session.context || {}),\n  isNewSession:   true,\n  messageText:    msgData.messageText,\n  messageType:    msgData.messageType,\n  remoteJid:      msgData.remoteJid,\n  instance:       msgData.instance\n}}];"
       },
-      "id": "87b8c7d4-8f41-468e-9d1d-b8cc772cbd6b",
+      "id": "5982558e-2c1a-4478-a90e-e3fb2ceadedd",
       "name": "🔧 Normalizar — Sesión Nueva",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1552,
-        -112
+        672,
+        -992
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Este nodo recibe data de CUALQUIERA de los dos Normalizar nodes.\n// $json contiene el contexto unificado de la sesión.\nconst s = $json;\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      s.userId,\n    sessionId:   s.sessionId,\n    agent:       s.activeAgent,\n    role:        'user',\n    message:     s.messageText,\n    messageType: s.messageType\n  },\n  // Transportar contexto de sesión para nodos posteriores\n  _session: {\n    userId:         s.userId,\n    userName:       s.userName,\n    userLanguage:   s.userLanguage,\n    userPhone:      s.userPhone,\n    sessionId:      s.sessionId,\n    activeAgent:    s.activeAgent,\n    sessionState:   s.sessionState,\n    sessionContext: s.sessionContext,\n    isNewSession:   s.isNewSession,\n    messageText:    s.messageText,\n    messageType:    s.messageType,\n    remoteJid:      s.remoteJid,\n    instance:       s.instance\n  }\n}}];"
+        "jsCode": "// Este nodo recibe data de CUALQUIERA de los dos Normalizar nodes.\n// $json contiene el contexto unificado de la sesión.\nconst s = $json;\n\n// ── DEDUPLICACIÓN: evitar procesar el mismo mensaje dos veces en <5s ─────────\nconst now      = Date.now();\nconst msgText  = (s.messageText || '').trim();\nconst lastAt   = s.sessionContext?._last_msg_at   || 0;\nconst lastText = (s.sessionContext?._last_msg_text || '').trim();\n\nif (msgText && msgText === lastText && (now - lastAt) < 5000) {\n  return []; // Mensaje duplicado en ventana de 5s — detener flujo\n}\n// ─────────────────────────────────────────────────────────────────────────────\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      s.userId,\n    sessionId:   s.sessionId,\n    agent:       s.activeAgent,\n    role:        'user',\n    message:     s.messageText,\n    messageType: s.messageType\n  },\n  // Transportar contexto de sesión para nodos posteriores\n  _session: {\n    userId:         s.userId,\n    userName:       s.userName,\n    userLanguage:   s.userLanguage,\n    userPhone:      s.userPhone,\n    sessionId:      s.sessionId,\n    activeAgent:    s.activeAgent,\n    sessionState:   s.sessionState,\n    sessionContext: {\n      ...s.sessionContext,\n      _last_msg_at:   now,\n      _last_msg_text: msgText,\n      _pending_intent: s.sessionContext?._pending_intent || null\n    },\n    isNewSession:   s.isNewSession,\n    messageText:    s.messageText,\n    messageType:    s.messageType,\n    remoteJid:      s.remoteJid,\n    instance:       s.instance\n  }\n}}];"
       },
-      "id": "db37ea24-7d5a-42ef-865d-67277f8ad646",
+      "id": "83838e69-9488-4f4a-ac52-333f426473f7",
       "name": "📦 Payload — Guardar Mensaje Entrante",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1248,
-        -112
+        976,
+        -992
       ]
     },
     {
@@ -221,26 +221,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "f89c3bff-b248-4884-9026-da8a194ecc52",
+      "id": "05784a77-d0d0-4bca-a830-fbdf795e6085",
       "name": "🗄️ DB — Guardar Mensaje Entrante",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1008,
-        -112
+        1216,
+        -992
       ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// INTENT ROUTER v2.2.1 — Multilingüe (ES + EN + PT)\n// Fix: saludos rompen continuidad de SAGE/ATLAS para permitir reinicio\n// ============================================================\n\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst normalize   = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();\nconst txtN        = normalize(session.messageText || '');\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── DETECCIÓN DE IDIOMA ──────────────────────────────────────\nconst detectLanguage = (text) => {\n  const t = ' ' + text + ' ';\n  const PT = ['não ','você','obrigad','olá','boa tarde','boa noite','bom dia',' oi ','posso','também','então','cotação','preço','quanto custa','cirurgia','procedimento','viagem','hospedagem','dentista','dente','clareamento','lipoaspiração','mamoplastia','alinhador'];\n  const EN = [\n    ' the ',' is ',' are ',' my ',\n    ' want',' need',' have',' has ',\n    \"i'm \",\"i'd \",\"don't\",\"can't\",\"won't\",\"i'll\",\"i've \",\"i was \",\"i am \",\n    ' what ',' how ',' where ',' does ',\n    'hello','good morning','good afternoon','good evening','good night',\n    'quote','price','surgery','dental work','tooth','teeth',\n    'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation',\n    'breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n    'appointment','schedule','book ','booking','see a doctor','accommodation','lodging'\n  ];\n  if (PT.some(m => t.includes(m))) return 'pt';\n  if (EN.some(m => t.includes(m))) return 'en';\n  return null;\n};\n\n// ── FIX #3 v2.2.1: idioma persistente por sesión ─────────────\n// Si la sesión ya tiene un idioma establecido (guardado por SAGE/ATLAS),\n// se respeta. Solo se re-detecta cuando no hay idioma de sesión previo.\nconst sessionLang    = session.sessionContext?.language || null;\nconst detectedLanguage = sessionLang || detectLanguage(txt) || session.userLanguage || 'es';\nconst out = (extra) => ({ json: { ...session, detectedLanguage, ...extra } });\n// ── CONSENT CHECK ─────────────────────────────────────────────\nconst ctx = session.sessionContext || {};\nif (!ctx.consent_given) {\n  if (ctx.awaiting_consent) {\n    const hasExplicitYes = /\\b(s[ií]|si$|yes|sim|ok\\b|dale|claro|acepto|continuar|continue|adelante|de acuerdo|confirmo|por supuesto|sure|aceito|concordo|accept|agree)\\b/i.test(txt.trim());\n    const hasExplicitNo  = (\n      /^no[\\s,\\.!¡¿]/i.test(txt.trim()) ||\n      /\\b(no acepto|no quiero|no deseo|no autorizo|rechazo|refuse|reject|decline|deny|não aceito|nao aceito)\\b/i.test(txt)\n    ) && !hasExplicitYes;\n    \n    if (hasExplicitNo) {\n      return [out({ targetAgent: 'CONSENT_REFUSED', intentDetected: 'consent_refused', pendingHandoff: null })];\n    }\n    return [out({ targetAgent: 'CONSENT_ACCEPTED', intentDetected: 'consent_accepted', pendingHandoff: null })];\n  }\n  return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent', pendingHandoff: null })];\n}\n\n// SAFETY: SAGE en Q&A activo → siempre continuar, ignorar cualquier otro signal\nconst sageQAStates = ['gathering_profile','procedure_confirmed','questioning','summary','waiting_for_confirmation'];\nconst sageCtxState = session.sessionContext?.sage?.state || '';\nif (activeAgent === 'SAGE' && sageQAStates.includes(sageCtxState) && !isNew) {\n  return [out({ targetAgent: 'SAGE', intentDetected: 'sage_qa_active', pendingHandoff: null })];\n}\n\n// ── KW_SALUDO — definido ANTES de REGLA 1 para poder usarlo ──\nconst KW_SALUDO = [\n  'hola','buenos días','buenas tardes','buenas noches','buenas','inicio','empezar','comenzar','iniciar',\n  'hello','hi ','hey ','good morning','good afternoon','good evening','good night','start','begin',\n  'olá ','oi ','bom dia','boa tarde','boa noite','começar','ajuda','informação','informacao'\n];\nconst hasSaludo = KW_SALUDO.some(kw => txtN.includes(normalize(kw)));\n\n// ── REGLA 1: Respetar agente activo — EXCEPTO saludos ────────\n// Un saludo mientras SAGE/ATLAS está activo indica reinicio de sesión.\n// Sin esta excepción, sesiones técnicamente \"activas\" de días anteriores\n// atrapan al usuario sin poder hablar con NOVA.\nconst hasExplicitAtlas = /^(atlas|comparar?|compare|destinos?|destinations?|quiero comparar|i want to compare|want to compare|quero comparar|ver destinos)$/i.test(txt);\nconst hasExplicitSage  = /^(sage|cotizar|cotar|nueva solicitud|new request|nova cotacao)$/i.test(txt);\nif (activeAgent === 'SAGE'  && !isNew && !hasSaludo && !hasExplicitAtlas) return [out({ targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null })];\nif (activeAgent === 'ATLAS' && !isNew && !hasSaludo && !hasExplicitSage)  return [out({ targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null })];\n\n// ── REGLA 2: Botones interactivos ────────────────────────────\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt.includes('quote')    || txt.includes('cotar'))    return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  })];\n  if (txt.includes('comparar') || txt.includes('compare') || txt.includes('comparar')) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' })];\n  if (txt.includes('agendar')  || txt.includes('schedule') || txt.includes('agendar')) return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   })];\n  return [out({ targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null })];\n}\n\n// ── REGLA 3: Keywords trilingüe ──────────────────────────────\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela',\n'carie','caries','dolor de muela','dolor dental','me duele','empaste',\n'relleno','funda','corona','sarro','encia','encías','sangrado',\n'nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'quote','how much','price','rate','fee',\n  'tooth','teeth','implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'procedure','surgery','treatment','dental work','dental procedure',\n  'cotação','preço','quanto custa','quanto é','valor do',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','abdominoplastia','mamoplastia','aumento de seios','redução mamária','bichectomia','blefaroplastia','lifting facial',\n  'procedimento','cirurgia','dentista','dente','molar','tratamento dental'\n];\nconst KW_COMPARAR = [\n  'compar','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena','perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami','cancún','cancun','ciudad de mexico','santo domingo',\n  'compare','comparison','destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'comparar','comparação','viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','disponibilidad','horario','me atiendan','consulta',\n  'appointment','schedule','book ','booking','see a doctor','availability','available','make an appointment','want to see',\n  'marcar consulta','marcar uma','reservar consulta','disponibilidade','atendimento','quero consulta'\n];\n\nconst hasCotizar  = KW_COTIZAR.some(kw  => txtN.includes(normalize(kw)));\nconst hasComparar = KW_COMPARAR.some(kw => txtN.includes(normalize(kw)));\nconst hasAgendar  = KW_AGENDAR.some(kw  => txtN.includes(normalize(kw)));\n\nif (hasCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_keyword',  pendingHandoff: 'SAGE'  })];\nif (hasComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_keyword', pendingHandoff: 'ATLAS' })];\nif (hasAgendar)  return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_keyword',  pendingHandoff: null   })];\nif (hasSaludo)   return [out({ targetAgent: 'NOVA', intentDetected: 'saludo',           pendingHandoff: null   })];\n\nreturn [out({ targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null })];"
+        "jsCode": "// ============================================================\n// INTENT ROUTER v2.3.0 — Multilingüe (ES + EN + PT)\n// Fix v2.3.0:\n//   - ctx declarado antes de sessionLang (ReferenceError fix)\n//   - Consent requiere hasExplicitYes (no acepta \"Hello\" como consent)\n//   - sessionLang ignorado durante awaiting_consent (lang por mensaje)\n//   - detectLanguage ampliado: 'hi', 'hey', 'yes', 'sim', etc.\n// ============================================================\n\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst normalize   = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();\nconst txtN        = normalize(session.messageText || '');\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── DETECCIÓN DE IDIOMA ──────────────────────────────────────\nconst detectLanguage = (text) => {\n  const t = ' ' + text + ' ';\n  const PT = [\n    'não ','você','obrigad','olá','boa tarde','boa noite','bom dia',' oi ',' sim ',\n    'posso','também','então','cotação','preço','quanto custa','cirurgia',\n    'procedimento','viagem','hospedagem','dentista','dente','clareamento',\n    'lipoaspiração','mamoplastia','alinhador'\n  ];\n  const EN = [\n    ' the ',' is ',' are ',' my ',\n    ' want',' need',' have',' has ',\n    \"i'm \",\"i'd \",\"don't\",\"can't\",\"won't\",\"i'll\",\"i've \",\"i was \",\"i am \",\n    ' what ',' how ',' where ',' does ',\n    'hello','good morning','good afternoon','good evening','good night',\n    ' hi ', ' hey ',\n    'quote','price','surgery','dental work','tooth','teeth',\n    'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation',\n    'breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n    'appointment','schedule','book ','booking','see a doctor','accommodation','lodging'\n  ];\n  const ES = ['hola', ' gracias', 'buenos ', 'buenas', ' qué ', 'cotizar', 'cotización', 'agendar', 'por favor', 'español'];\n  if (PT.some(m => t.includes(m))) return 'pt';\n  if (EN.some(m => t.includes(m))) return 'en';\n  if (ES.some(m => t.includes(m))) return 'es';\n  return null;\n};\n\n// ── ctx debe declararse ANTES de sessionLang ─────────────────\nconst ctx = session.sessionContext || {};\n\n// ── FIX v2.3.0: durante consent, re-detectar idioma por mensaje\n// Fuera del consent, respetar idioma guardado en sesión.\nconst sessionLang      = ctx.awaiting_consent ? null : (session.sessionContext?.language || null);\nconst freshDetect      = detectLanguage(txt);\nconst detectedLanguage = sessionLang\n  ? sessionLang\n  : (freshDetect || session.userLanguage || 'es');\nconst out = (extra) => ({ json: { ...session, detectedLanguage, ...extra } });\n\n// Si el turno anterior guardó un pendingHandoff (ej: intención detectada en primer mensaje)\n// lo procesamos aquí antes que cualquier otra lógica\nconst ctxPendingHandoff = ctx.pendingHandoff || null;\nconst ctxPendingMessage = ctx.pendingMessage || null;\nif (ctxPendingHandoff && ctx.consent_given) {\n  return [out({\n    targetAgent:     'NOVA',\n    intentDetected:  ctxPendingHandoff === 'SAGE' ? 'cotizar_keyword' : ctxPendingHandoff === 'ATLAS' ? 'comparar_keyword' : 'agendar_keyword',\n    pendingHandoff:  ctxPendingHandoff,\n    pendingMessage:  ctxPendingMessage\n  })];\n}\n\n// ── CONSENT CHECK ─────────────────────────────────────────────\nif (!ctx.consent_given) {\n  if (ctx.awaiting_consent) {\n    const hasExplicitYes = /\\b(s[ií]|si$|yes|sim|ok\\b|dale|claro|acepto|continuar|continue|adelante|de acuerdo|confirmo|por supuesto|sure|aceito|concordo|accept|agree)\\b/i.test(txt.trim());\n    const hasExplicitNo  = (\n      /^no[\\s,\\.!¡¿]/i.test(txt.trim()) ||\n      /\\b(no acepto|no quiero|no deseo|no autorizo|rechazo|refuse|reject|decline|deny|não aceito|nao aceito)\\b/i.test(txt)\n    ) && !hasExplicitYes;\n\n    if (hasExplicitNo) {\n      return [out({ targetAgent: 'CONSENT_REFUSED', intentDetected: 'consent_refused', pendingHandoff: null })];\n    }\n    if (hasExplicitYes) {\n      return [out({ targetAgent: 'CONSENT_ACCEPTED', intentDetected: 'consent_accepted', pendingHandoff: null })];\n    }\n    // Respuesta ambigua (ej: \"Hello\", \"ho\", \"?\") → re-mostrar aviso en idioma detectado\n    return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent_reask', pendingHandoff: null })];\n  }\n  return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent', pendingHandoff: null })];\n}\n\n// ── SAFETY: SAGE en Q&A activo → siempre continuar ───────────\nconst sageQAStates = ['gathering_profile','procedure_confirmed','questioning','summary','waiting_for_confirmation'];\nconst sageCtxState = session.sessionContext?.sage?.state || '';\nif (activeAgent === 'SAGE' && sageQAStates.includes(sageCtxState) && !isNew) {\n  return [out({ targetAgent: 'SAGE', intentDetected: 'sage_qa_active', pendingHandoff: null })];\n}\n\n// ── KW_SALUDO — definido ANTES de REGLA 1 ────────────────────\nconst KW_SALUDO = [\n  'hola','buenos días','buenas tardes','buenas noches','buenas','inicio','empezar','comenzar','iniciar',\n  'hello','hi ','hey ','good morning','good afternoon','good evening','good night','start','begin',\n  'olá ','oi ','bom dia','boa tarde','boa noite','começar','ajuda','informação','informacao'\n];\nconst hasSaludo = KW_SALUDO.some(kw => txtN.includes(normalize(kw)));\n\n// ── REGLA 1: Respetar agente activo — EXCEPTO saludos ────────\nconst hasExplicitAtlas = /^(atlas|comparar?|compare|destinos?|destinations?|quiero comparar|i want to compare|want to compare|quero comparar|ver destinos)$/i.test(txt);\nconst hasExplicitSage  = /^(sage|cotizar|cotar|nueva solicitud|new request|nova cotacao)$/i.test(txt);\nif (activeAgent === 'SAGE'  && !isNew && !hasSaludo && !hasExplicitAtlas) return [out({ targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null })];\nif (activeAgent === 'ATLAS' && !isNew && !hasSaludo && !hasExplicitSage)  return [out({ targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null })];\n\n// ── REGLA 2: Botones interactivos ────────────────────────────\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt.includes('quote')    || txt.includes('cotar'))    return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  })];\n  if (txt.includes('comparar') || txt.includes('compare') || txt.includes('comparar')) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' })];\n  if (txt.includes('agendar')  || txt.includes('schedule') || txt.includes('agendar')) return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   })];\n  return [out({ targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null })];\n}\n\n// ── REGLA 3: Keywords trilingüe ──────────────────────────────\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela',\n  'carie','caries','dolor de muela','dolor dental','me duele','empaste',\n  'relleno','funda','corona','sarro','encia','encías','sangrado',\n  'nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'quote','how much','price','rate','fee',\n  'tooth','teeth','implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'procedure','surgery','treatment','dental work','dental procedure',\n  'cotação','preço','quanto custa','quanto é','valor do',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','abdominoplastia','mamoplastia','aumento de seios','redução mamária','bichectomia','blefaroplastia','lifting facial',\n  'procedimento','cirurgia','dentista','dente','molar','tratamento dental'\n];\nconst KW_COMPARAR = [\n  'compar','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena','perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami','cancún','cancun','ciudad de mexico','santo domingo',\n  'compare','comparison','destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'comparar','comparação','viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','disponibilidad','horario','me atiendan','consulta',\n  'appointment','schedule','book ','booking','see a doctor','availability','available','make an appointment','want to see',\n  'marcar consulta','marcar uma','reservar consulta','disponibilidade','atendimento','quero consulta'\n];\n\nconst hasCotizar  = KW_COTIZAR.some(kw  => txtN.includes(normalize(kw)));\nconst hasComparar = KW_COMPARAR.some(kw => txtN.includes(normalize(kw)));\nconst hasAgendar  = KW_AGENDAR.some(kw  => txtN.includes(normalize(kw)));\n\nif (hasCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_keyword',  pendingHandoff: 'SAGE'  })];\nif (hasComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_keyword', pendingHandoff: 'ATLAS' })];\nif (hasAgendar)  return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_keyword',  pendingHandoff: null   })];\nif (hasSaludo)   return [out({ targetAgent: 'NOVA', intentDetected: 'saludo',           pendingHandoff: null   })];\n\nreturn [out({ targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null })];\n"
       },
-      "id": "ecabd83f-fa86-4cd9-b0cc-a430722628c8",
+      "id": "225fde6b-e540-4cdf-94ec-d433020ee2c6",
       "name": "🧠 Router de Intención y Agente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3552,
-        336
+        -1344,
+        -544
       ]
     },
     {
@@ -386,26 +386,26 @@
         },
         "options": {}
       },
-      "id": "c18ab7cf-3d59-4f4f-94e2-e271bb6c52c4",
+      "id": "ce15c7df-e49b-4f95-af2a-663d3968240d",
       "name": "🔀 Switch — Agente Activo",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        -2672,
-        544
+        -464,
+        -336
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// PREPARAR ENVÍO WHATSAPP v1.0.1\n// Recibe output de NOVA, SAGE o ATLAS.\n// Prepara payload para Evolution API V2.\n// Fix: validación de sessionId + número siempre presente.\n// ============================================================\n\nconst a = $json;\n\n// Safeguard sessionId — NaN y undefined se convierten a null\n// para que updateSession falle explícitamente en vez de silenciosamente.\nconst rawSessionId  = a.sessionId;\nconst safeSessionId = (rawSessionId !== null && rawSessionId !== undefined &&\n                       Number.isInteger(Number(rawSessionId)) &&\n                       Number(rawSessionId) > 0)\n  ? Number(rawSessionId)\n  : null;\n\nif (!safeSessionId) {\n  console.error(`[PANGI] ⚠️ sessionId inválido del agente: \"${rawSessionId}\". Agent: ${a.newActiveAgent}`);\n}\n\n// Safeguard remoteJid — sin esto Evolution API devuelve 400 Bad Request\nconst remoteJid = a.remoteJid || null;\nif (!remoteJid) {\n  console.error(`[PANGI] ⚠️ remoteJid ausente en output del agente: ${a.newActiveAgent}`);\n}\n\nconst instanceName = a.instance || 'Test1';\n\nreturn [{ json: {\n  evolutionUrl:  `https://evolution.coopelmilagro.com/message/sendText/${instanceName}`,\n  evolutionBody: JSON.stringify({\n    number: remoteJid,\n    text:   a.responseText || 'Error interno. Por favor escribe de nuevo.',\n    delay:  1000\n  }),\n  _responseText:        a.responseText || '',\n  _remoteJid:           remoteJid,\n  _instance:            instanceName,\n  _userId:              a.userId,\n  _sessionId:           safeSessionId,\n  _newActiveAgent:      a.newActiveAgent  || 'NOVA',\n  _newSessionState:     a.newSessionState || 'active',\n  _newSessionContext:   a.newSessionContext || {}\n}}];"
       },
-      "id": "8e9fce0b-1ea4-4602-a7e9-626508a1c862",
+      "id": "f5011c97-6505-4dec-9167-0f298119fe45",
       "name": "📤 Preparar Envío WhatsApp",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1552,
-        112
+        672,
+        -768
       ]
     },
     {
@@ -422,13 +422,13 @@
           "timeout": 15000
         }
       },
-      "id": "5993412e-6ada-408c-88dc-43f9e9f1f7b5",
+      "id": "768f65c7-3ad2-4b7c-9eec-de3684ef84fc",
       "name": "📱 Evolution API — Enviar Respuesta",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        -1312,
-        112
+        912,
+        -768
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -442,13 +442,13 @@
       "parameters": {
         "jsCode": "// Recuperar contexto del nodo de preparación (anterior al HTTP)\nconst prep = $('📤 Preparar Envío WhatsApp').first().json;\n\nreturn [{ json: {\n  operation: 'updateSession',\n  params: {\n    sessionId: prep._sessionId,\n    agent:     prep._newActiveAgent,\n    state:     prep._newSessionState,\n    context:   prep._newSessionContext\n  },\n  // Transportar para guardar mensaje saliente\n  _prep: prep\n}}];"
       },
-      "id": "5a91f960-3174-4c40-9bce-fc93df4e8028",
+      "id": "50a9db56-e0de-41c2-8c83-b0ae2674c04a",
       "name": "📦 Payload — Update Session",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1072,
-        112
+        1152,
+        -768
       ]
     },
     {
@@ -456,26 +456,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "3be9b9a0-c844-4ceb-861b-89f259685312",
+      "id": "6c7b3e8f-18a1-4e22-890e-796c9df93aca",
       "name": "🗄️ DB — Update Session",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1536,
-        400
+        688,
+        -480
       ]
     },
     {
       "parameters": {
         "jsCode": "const prep = $('📦 Payload — Update Session').first().json._prep;\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      prep._userId,\n    sessionId:   prep._sessionId,\n    agent:       prep._newActiveAgent,\n    role:        'assistant',\n    message:     prep._responseText,\n    messageType: 'text'\n  }\n}}];"
       },
-      "id": "2d8cf19f-11d8-42a0-847e-71c19d770186",
+      "id": "6747da14-ef73-4b01-9b75-d3e44d63d473",
       "name": "📦 Payload — Guardar Mensaje Saliente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1296,
-        400
+        928,
+        -480
       ]
     },
     {
@@ -483,26 +483,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "d6620f09-ffd9-4725-852c-f5208b7f7b13",
+      "id": "6045072f-1c55-414e-8b8f-5ffbba392cfc",
       "name": "🗄️ DB — Guardar Mensaje Saliente",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -1056,
-        400
+        1168,
+        -480
       ]
     },
     {
       "parameters": {
         "jsCode": "// Mensajes filtrados silenciosamente.\n// Esto es intencional: no queremos responder a bots,\n// grupos, estados, ni mensajes propios.\nconst reason = $json.reason || 'unknown';\nconsole.log(`[PANGI] Mensaje ignorado. Razón: ${reason}`);\nreturn [{ json: { ignored: true, reason } }];"
       },
-      "id": "ec09c14b-dbef-48dc-b4ef-ba18080e76b9",
+      "id": "7e7376c4-a035-4795-b2a8-3a0ec2919aa8",
       "name": "🚫 Ignorar — No Procesable",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2848,
-        -176
+        -640,
+        -1056
       ]
     },
     {
@@ -527,10 +527,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -2320,
-        304
+        -112,
+        -576
       ],
-      "id": "dcac3db9-b7b7-48bf-9111-dc80bf42adb7",
+      "id": "a3ae671b-4d99-4bba-8a73-0809e80a042e",
       "name": "Call '02_sage'"
     },
     {
@@ -555,10 +555,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -2320,
-        112
+        -112,
+        -768
       ],
-      "id": "97c83672-08c7-43ca-9ea4-b239f64be737",
+      "id": "aeb8aa44-59f1-4c32-86b7-1b6850ad585d",
       "name": "Call '01_nova'"
     },
     {
@@ -583,10 +583,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        -2320,
-        512
+        -112,
+        -368
       ],
-      "id": "95327116-bee7-4d41-a1bf-85be12ba911e",
+      "id": "ab88b5fb-35af-4319-a1bf-7295882d2cfc",
       "name": "Call '03_atlas'"
     },
     {
@@ -613,26 +613,26 @@
         },
         "options": {}
       },
-      "id": "385f0247-b621-463d-b7ef-b9d46f80ee53",
+      "id": "c1b91547-a871-4bb4-88a0-b02415d788db",
       "name": "✅ ¿Intent Claro?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -3344,
-        336
+        -1136,
+        -544
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// PREPARAR CLAUDE NLU v1.0 — Paso 1\n// Solo llega aquí cuando keywords no detectaron intención clara.\n// Haiku clasifica intención y detecta idioma del mensaje.\n// ============================================================\nconst session = $json;\n\nconst systemPrompt = `Eres un clasificador de intenciones para Pangi, plataforma de turismo médico latinoamericana.\n\nINTENCIONES DISPONIBLES:\n- cotizar: quiere cotizar, ver precio o info sobre procedimiento médico/dental\n- comparar: quiere comparar destinos médicos o calcular costo total del viaje\n- agendar: quiere agendar cita, consulta o ver disponibilidad de médico\n- saludo: saludo, inicio de conversación, agradecimiento, afirmación genérica\n- unclear: no es posible determinar la intención con confianza suficiente\n\nIDIOMA DEL MENSAJE: es (español), en (inglés), pt (portugués)\n\nREGLAS:\n1. Si el mensaje menciona un procedimiento médico o dental, es 'cotizar'\n2. Si el mensaje menciona destinos, viajes, costos de viaje, es 'comparar'\n3. Si el mensaje menciona agendar, cita, turno, appointment, es 'agendar'\n4. Si confidence < 0.70, usa 'unclear'\n5. Responde SOLO con JSON válido, sin markdown, sin explicación:\n\n{\"intent\":\"cotizar\",\"language\":\"es\",\"confidence\":0.92}`;\n\nreturn [{ json: {\n  _session: session,\n  claudePayload: {\n    model: \"claude-haiku-4-5-20251001\",\n    max_tokens: 60,\n    system: systemPrompt,\n    messages: [{ role: \"user\", content: session.messageText || \"\" }]\n  }\n}}];"
       },
-      "id": "55e084a7-86e3-4690-bf0b-576e6c182f75",
+      "id": "77d03c0f-89b4-4b54-ba7f-9d6de5929a96",
       "name": "📦 Preparar — Claude NLU",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2912,
-        112
+        -704,
+        -768
       ]
     },
     {
@@ -662,13 +662,13 @@
           "timeout": 8000
         }
       },
-      "id": "4082c1bf-30a3-48f1-a480-ba53447c5c0c",
+      "id": "3d926348-90ab-42b5-80f4-778dfc3b16ae",
       "name": "☁️ Claude NLU — Haiku",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        -2656,
-        112
+        -448,
+        -768
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -687,39 +687,39 @@
       "parameters": {
         "jsCode": "// ============================================================\n// PROCESAR INTENT CLAUDE v1.0 — Paso 1\n// Merge del resultado de Claude con el contexto de sesión.\n// Fallback robusto: cualquier fallo → mantiene 'unclear',\n// NOVA mostrará el menú de opciones al usuario.\n// ============================================================\nconst httpResult = $json;\nconst prepData   = $('📦 Preparar — Claude NLU').first().json;\nconst session    = prepData._session;\n\n// Default: mantener resultado del keyword router\nlet intentDetected   = session.intentDetected;  // 'unclear'\nlet pendingHandoff   = session.pendingHandoff;  // null\nlet targetAgent      = session.targetAgent;     // 'NOVA'\nlet detectedLanguage = session.detectedLanguage;\n\n// Mapeo: intent Claude → estructura del router\nconst INTENT_MAP = {\n  cotizar:  { handoff: 'SAGE',  intent: 'cotizar_claude'  },\n  comparar: { handoff: 'ATLAS', intent: 'comparar_claude' },\n  agendar:  { handoff: null,    intent: 'agendar_claude'  },\n  saludo:   { handoff: null,    intent: 'saludo_claude'   },\n  unclear:  { handoff: null,    intent: 'unclear'         }\n};\n\nconst VALID_INTENTS = Object.keys(INTENT_MAP);\n\ntry {\n  // httpResult puede ser la respuesta de Claude o un error de continueOnFail\n  const content = httpResult?.content?.[0]?.text;\n  if (content) {\n    const clean  = content.replace(/```json\\n?|```\\n?/g, '').trim();\n    const parsed = JSON.parse(clean);\n\n    if (\n      VALID_INTENTS.includes(parsed.intent) &&\n      typeof parsed.confidence === 'number' &&\n      parsed.confidence >= 0.70\n    ) {\n      const mapping  = INTENT_MAP[parsed.intent];\n      intentDetected = mapping.intent;\n      pendingHandoff = mapping.handoff;\n      // targetAgent siempre NOVA: la lógica de handoff está en NOVA motor\n\n      // Actualizar idioma solo si Claude lo detectó con certeza\n      if (parsed.language && ['es','en','pt'].includes(parsed.language)) {\n        detectedLanguage = parsed.language;\n      }\n    }\n    // confidence < 0.70 → mantiene 'unclear' → NOVA da menú orientador\n  }\n} catch(e) {\n  // Claude falló, timeout, JSON inválido, etc.\n  // Fallback silencioso: 'unclear' → NOVA orienta al usuario\n  // No interrumpir la conversación por un fallo de API\n}\n\nreturn [{ json: {\n  ...session,\n  intentDetected,\n  pendingHandoff,\n  targetAgent,\n  detectedLanguage,\n  _nluSource: intentDetected.includes('_claude') ? 'claude' : 'keywords_fallback'\n}}];"
       },
-      "id": "ec943cba-dfab-436e-b9fb-a4d3b67c46fb",
+      "id": "8c4c8c93-176f-4ccc-938e-454fbc68e647",
       "name": "🔧 Procesar — Intent Claude",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2928,
-        384
+        -720,
+        -496
       ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// 📋 Aviso de Privacidad v2.0\n// Solo envía el aviso. NO acepta consentimiento aún.\n// Guarda awaiting_consent: true para que el router\n// maneje la respuesta del usuario en el siguiente mensaje.\n// ============================================================\nconst inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\n\nconst NOTICE = {\n  es: `📋 *Aviso de Privacidad*\\n\\nAl usar este servicio aceptas que Pangi procese tu información de salud con fines de orientación médica. Tus datos se almacenan de forma segura y no se comparten con terceros sin tu autorización.\\n\\n_Más información en pangi.com/privacidad_\\n\\n*¿Aceptas continuar?* Responde *sí* para continuar o *no* para cancelar.`,\n  en: `📋 *Privacy Notice*\\n\\nBy using this service you agree that Pangi may process your health information for medical guidance purposes. Your data is securely stored and not shared with third parties without your authorization.\\n\\n_More info at pangi.com/privacy_\\n\\n*Do you accept to continue?* Reply *yes* to continue or *no* to cancel.`,\n  pt: `📋 *Aviso de Privacidade*\\n\\nAo usar este serviço você concorda que o Pangi processe suas informações de saúde para fins de orientação médica. Seus dados são armazenados com segurança e não são compartilhados com terceiros sem sua autorização.\\n\\n_Mais informações em pangi.com/privacidade_\\n\\n*Você aceita continuar?* Responda *sim* para continuar ou *não* para cancelar.`\n};\n\nconst lang = LANG in NOTICE ? LANG : 'es';\n\nreturn [{ json: {\n  responseText:      NOTICE[lang],\n  newActiveAgent:    inp.activeAgent || 'NOVA',\n  newSessionState:   'awaiting_consent',\n  newSessionContext: {\n    ...ctx,\n    awaiting_consent: true,\n    consent_given:    false,\n    language:         lang\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
+        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\nconst NOTICE = {\n  es: `📋 *Aviso de Privacidad*\\n\\nAl usar este servicio aceptas que Pangi procese tu información de salud con fines de orientación médica. Tus datos se almacenan de forma segura y no se comparten con terceros sin tu autorización.\\n\\n_Más información en pangi.com/privacy_\\n\\n*¿Aceptas continuar?* Responde *sí* para continuar o *no* para cancelar.`,\n  en: `📋 *Privacy Notice*\\n\\nBy using this service you agree that Pangi may process your health information for medical guidance purposes. Your data is securely stored and not shared with third parties without your authorization.\\n\\n_More info at pangi.com/privacy_\\n\\n*Do you accept to continue?* Reply *yes* to continue or *no* to cancel.`,\n  pt: `📋 *Aviso de Privacidade*\\n\\nAo usar este serviço você concorda que o Pangi processe suas informações de saúde para fins de orientação médica. Seus dados são armazenados com segurança e não são compartilhados com terceiros sem sua autorização.\\n\\n_Mais informações em pangi.com/privacy_\\n\\n*Você aceita continuar?* Responda *sim* para continuar ou *não* para cancelar.`\n};\nconst lang = LANG in NOTICE ? LANG : 'es';\n\n// Detectar si el primer mensaje tiene intención relevante\nconst pendingTxt  = inp.messageText || '';\nconst pendingTxtN = pendingTxt.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');\nconst isTrivialFirst = /^(hola|hi|hey|hello|ol[aá]|oi|bom dia|buenas?|inicio|start|begin|come[cç]ar|ok|yes|sim|dale)[\\s!.]*$/i.test(pendingTxt.trim());\nconst hasIntentFirst = !isTrivialFirst && /cotiz|implante|rinoplas|liposu|mamario|dental|diente|muela|ortodoncia|blanquea|endodoncia|carilla|veneer|corona|puente|protesis|extrac|procedimiento|cirugia|cirugía|nariz|quote|price|surgery|tooth|teeth|compar|destino|turismo|agendar|cita|reservar|appointment|schedule|cotação|preço|cirurgia/.test(pendingTxtN);\n\nreturn [{ json: {\n  responseText:      NOTICE[lang],\n  newActiveAgent:    inp.activeAgent || 'NOVA',\n  newSessionState:   'awaiting_consent',\n  newSessionContext: {\n    ...ctx,\n    awaiting_consent: true,\n    consent_given:    false,\n    language:         lang,\n    _pending_intent:  hasIntentFirst ? pendingTxt : null\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2320,
-        720
+        -112,
+        -160
       ],
-      "id": "db922135-6f97-4746-869c-8faf6f9ae272",
+      "id": "2e424324-bb31-4439-993a-4835847df1c8",
       "name": "📋 Aviso de Privacidad + Bienvenida"
     },
     {
       "parameters": {
-        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\nconst fn   = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm   = fn ? ` ${fn}` : '';\n\nconst WELCOME = {\n  es: `✅ *Gracias por aceptar${nm}.*\\n\\n👋 Soy *NOVA*, tu asistente de salud en Pangi.\\n\\n¿En qué puedo ayudarte hoy?\\n\\n💰 Escribe *cotizar* — Recibe precios precisos de médicos\\n🗺️ Escribe *comparar* — Analiza el costo total de tu viaje médico\\n🗓️ Escribe *agendar* — Busca médicos y reserva citas`,\n  en: `✅ *Thank you for accepting${nm}.*\\n\\n👋 I'm *NOVA*, your Pangi health assistant.\\n\\nHow can I help you today?\\n\\n💰 Type *quote* — Get precise pricing from doctors\\n🗺️ Type *compare* — Analyze your full medical trip cost\\n🗓️ Type *schedule* — Find doctors and book appointments`,\n  pt: `✅ *Obrigado por aceitar${nm}.*\\n\\n👋 Sou *NOVA*, sua assistente de saúde do Pangi.\\n\\nComo posso te ajudar hoje?\\n\\n💰 Escreva *cotizar* — Receba preços precisos de médicos\\n🗺️ Escreva *comparar* — Analise o custo total da sua viagem médica\\n🗓️ Escreva *agendar* — Encontre médicos e reserve consultas`\n};\n\nconst lang = LANG in WELCOME ? LANG : 'es';\n\nreturn [{ json: {\n  responseText:      WELCOME[lang],\n  newActiveAgent:    'NOVA',\n  newSessionState:   'initial_presented',\n  newSessionContext: {\n    ...ctx,\n    consent_given:    true,\n    awaiting_consent: false,\n    language:         lang,\n    nova: { state: 'initial_presented' }\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
+        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\nconst fn   = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm   = fn ? ` ${fn}` : '';\n\nconst WELCOME = {\n  es: `✅ *Gracias por aceptar${nm}.*\\n\\n👋 Soy *NOVA*, tu asistente de salud en Pangi.\\n\\n¿En qué puedo ayudarte hoy?\\n\\n💰 Escribe *cotizar* — Recibe precios precisos de médicos\\n🗺️ Escribe *comparar* — Analiza el costo total de tu viaje médico\\n🗓️ Escribe *agendar* — Busca médicos y reserva citas`,\n  en: `✅ *Thank you for accepting${nm}.*\\n\\n👋 I'm *NOVA*, your Pangi health assistant.\\n\\nHow can I help you today?\\n\\n💰 Type *quote* — Get precise pricing from doctors\\n🗺️ Type *compare* — Analyze your full medical trip cost\\n🗓️ Type *schedule* — Find doctors and book appointments`,\n  pt: `✅ *Obrigado por aceitar${nm}.*\\n\\n👋 Sou *NOVA*, sua assistente de saúde do Pangi.\\n\\nComo posso te ajudar hoje?\\n\\n💰 Escreva *cotizar* — Receba preços precisos de médicos\\n🗺️ Escreva *comparar* — Analise o custo total da sua viagem médica\\n🗓️ Escreva *agendar* — Encontre médicos e reserve consultas`\n};\n\nconst lang = LANG in WELCOME ? LANG : 'es';\n\n// Si el primer mensaje tenía una intención clara, rutear directo sin pasar por NOVA\nconst pendingText  = ctx._pending_intent || '';\nconst pendingTextN = pendingText.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');\nconst hasCotizar   = !!pendingText && /cotiz|implante|rinoplas|liposu|mamario|dental|diente|muela|ortodoncia|blanquea|endodoncia|carilla|veneer|corona|puente|protesis|extrac|procedimiento|cirugia|cirugía|quote|price|surgery|tooth|teeth|cotação|preço|cirurgia/.test(pendingTextN);\nconst hasComparar  = !!pendingText && !hasCotizar && /compar|destino|turismo|costo.total|compare|destination|comparar/.test(pendingTextN);\nconst hasAgendar   = !!pendingText && !hasCotizar && !hasComparar && /agendar|cita|reservar|appointment|schedule|consulta/.test(pendingTextN);\n\nconst detectedPending = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : hasAgendar ? 'NOVA_AGENDAR' : null;\nif (detectedPending) {\n  const targetAgent = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : 'NOVA';\n  const pendingHandoff = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : null;\n  const welcomePrefix = lang === 'en'\n    ? `✅ *Thank you for accepting${nm}.*\\n\\n`\n    : lang === 'pt'\n    ? `✅ *Obrigado por aceitar${nm}.*\\n\\n`\n    : `✅ *Gracias por aceptar${nm}.*\\n\\n`;\n\n  return [{ json: {\n    responseText:      welcomePrefix + WELCOME[lang],\n    newActiveAgent:    'NOVA',\n    newSessionState:   'initial_presented',\n    newSessionContext: {\n      ...ctx,\n      consent_given:    true,\n      awaiting_consent: false,\n      language:         lang,\n      nova:             { state: 'initial_presented' },\n      pendingHandoff:   detectedPending,\n      pendingMessage:   pendingText,\n      _pending_intent:  null\n    },\n    intentDetected:    hasCotizar ? 'cotizar_keyword' : hasComparar ? 'comparar_keyword' : 'agendar_keyword',\n    userId:    inp.userId,\n    sessionId: inp.sessionId,\n    userName:  inp.userName || null,\n    remoteJid: inp.remoteJid,\n    instance:  inp.instance\n  }}];\n}\n\nreturn [{ json: {\n  responseText:      WELCOME[lang],\n  newActiveAgent:    'NOVA',\n  newSessionState:   'initial_presented',\n  newSessionContext: {\n    ...ctx,\n    consent_given:    true,\n    awaiting_consent: false,\n    language:         lang,\n    nova: { state: 'initial_presented' }\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2320,
-        1104
+        -112,
+        224
       ],
-      "id": "f5b8f805-f9d1-44bb-bbca-58ae6fa64a54",
+      "id": "e4f4d08a-1586-4ede-a6c3-46708cf0a4db",
       "name": "📋 Bienvenida Post-Consentimiento"
     },
     {
@@ -729,10 +729,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2320,
-        928
+        -112,
+        48
       ],
-      "id": "8ce24088-49fa-4dd6-92fa-eed7f00b7a2c",
+      "id": "d35ab612-986f-4fb5-9c2f-f925f133828b",
       "name": "📋 Rechazo de Consentimiento"
     }
   ],
@@ -1278,11 +1278,11 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "8a866a2f-ec51-4579-bbbf-4c1b7bcdb557",
+  "versionId": "e43c791b-623f-4b20-8ae1-c9afdf56642f",
   "meta": {
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
   },

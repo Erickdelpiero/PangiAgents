@@ -8,13 +8,13 @@
         ],
         "additionalFields": {}
       },
-      "id": "5d0a86e2-8ae2-4aeb-8d8a-4dfdf7415d15",
+      "id": "5cd70121-2dd4-4e98-af6e-76b7f1ab0e5e",
       "name": "📲 Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.2,
       "position": [
-        -1680,
-        256
+        -2320,
+        32
       ],
       "webhookId": "b7c2a1e4-5f3d-4a89-9c21-telegrampangi1",
       "credentials": {
@@ -26,41 +26,41 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// PANGI ORCHESTRATOR (TELEGRAM) — Message Extractor v2.0.0\n// Produce el SOBRE CANÓNICO agnóstico al canal:\n//   { channel, phone (identidad DB), remoteJid (transporte de\n//     respuesta), pushName, messageText, messageType, ... }\n// Mismos tipos canónicos que el extractor de WhatsApp:\n//   text | image | document | audio | sticker | button_reply\n// ============================================================\n\nconst update  = $input.first().json;\nconst message = update.message;\n\n// Solo procesamos updates de tipo 'message'\nif (!message) {\n  return [{ json: { valid: false, reason: 'not_message_update', updateKeys: Object.keys(update) } }];\n}\n\nconst chat = message.chat || {};\nconst from = message.from || {};\n\n// ── FILTROS ───────────────────────────────────────────────\nif (from.is_bot)              return [{ json: { valid: false, reason: 'from_bot' } }];\nif (chat.type !== 'private')  return [{ json: { valid: false, reason: 'not_private_chat', chatType: chat.type } }];\nif (!chat.id)                 return [{ json: { valid: false, reason: 'no_chat_id' } }];\n\nconst chatId = String(chat.id);\n\n// ── IDENTIDAD ─────────────────────────────────────────────\n// phone: identidad en DB con prefijo de canal → 'tg:123456789'\n//        (users.phone es VARCHAR(30) genérico; 'web:<uuid>' en el futuro)\n// remoteJid: id de transporte que el nodo de envío usa para responder\nconst phone     = 'tg:' + chatId;\nconst remoteJid = chatId;\n\nconst pushName = [from.first_name, from.last_name].filter(Boolean).join(' ').trim()\n              || from.username || null;\n\n// ── IDIOMA (bonus Telegram: language_code del cliente) ────\nconst rawLang = (from.language_code || '').toLowerCase();\nconst tgLanguage = rawLang.startsWith('es') ? 'es'\n                 : rawLang.startsWith('en') ? 'en'\n                 : rawLang.startsWith('pt') ? 'pt'\n                 : null;\n\n// ── CONTENIDO DEL MENSAJE → tipos canónicos ───────────────\nlet messageText = '';\nlet messageType = 'unknown';\n\nif (message.text) {\n  messageText = message.text;\n  messageType = 'text';\n} else if (message.photo) {\n  messageText = message.caption || '[Imagen recibida]';\n  messageType = 'image';\n} else if (message.document) {\n  messageText = `[Documento recibido: ${message.document.file_name || 'archivo'}]`;\n  messageType = 'document';\n} else if (message.voice || message.audio) {\n  messageText = '[Audio recibido — función de voz próximamente]';\n  messageType = 'audio';\n} else if (message.sticker) {\n  messageText = '[Sticker]';\n  messageType = 'sticker';\n} else if (message.location) {\n  messageText = '[Ubicación recibida]';\n  messageType = 'location';\n}\n\nif (!messageText) {\n  return [{ json: { valid: false, reason: 'unsupported_or_empty_message', msgKeys: Object.keys(message) } }];\n}\n// ── DEDUP KEY ─────────────────────────────────────────────\n// Álbum: las N fotos comparten media_group_id → solo una ejecución procesa.\n// Mensaje normal: update_id (Telegram reusa el mismo id al reintentar webhooks).\nconst dedupKey = message.media_group_id\n  ? `alb:${chatId}:${message.media_group_id}`\n  : `upd:${chatId}:${update.update_id || message.message_id || Date.now()}`;\nreturn [{ json: {\n  valid: true,\n  channel: 'telegram',\n  phone,\n  remoteJid,\n  pushName,\n  tgLanguage,\n  messageText,\n  messageType,\n  messageId: String(message.message_id || ''),\n  dedupKey,\n  mediaGroupId: message.media_group_id || null,\n  instance: 'telegram',\n  timestamp: new Date((message.date || Math.floor(Date.now()/1000)) * 1000).toISOString()\n}}];"
+        "jsCode": "// ============================================================\n// PANGI ORCHESTRATOR (TELEGRAM) — Message Extractor v2.0.0\n// Produce el SOBRE CANÓNICO agnóstico al canal:\n//   { channel, phone (identidad DB), remoteJid (transporte de\n//     respuesta), pushName, messageText, messageType, ... }\n// Mismos tipos canónicos que el extractor de WhatsApp:\n//   text | image | document | audio | sticker | button_reply\n// ============================================================\n\nconst update  = $input.first().json;\n// ── SOPORTE DE BOTONES (inline keyboard) ─────────────────\n// Telegram entrega las pulsaciones como 'callback_query', no como 'message'.\n// Se normalizan al MISMO sobre canónico con messageType 'button_reply' (el router\n// ya tiene su regla para ese tipo). INACTIVO hasta que el Trigger escuche\n// 'callback_query'; mientras tanto este bloque nunca se ejecuta.\nconst cbq     = update.callback_query || null;\nconst message = update.message || (cbq ? cbq.message : null);\n\nif (!message) {\n  return [{ json: { valid: false, reason: 'not_message_update', updateKeys: Object.keys(update) } }];\n}\n\nconst chat = message.chat || {};\n// En un callback, message.from es el BOT (emisor del mensaje con botones):\n// el usuario real es callback_query.from.\nconst from = cbq ? (cbq.from || {}) : (message.from || {});\n\n// ── FILTROS ───────────────────────────────────────────────\nif (from.is_bot)              return [{ json: { valid: false, reason: 'from_bot' } }];\nif (chat.type !== 'private')  return [{ json: { valid: false, reason: 'not_private_chat', chatType: chat.type } }];\nif (!chat.id)                 return [{ json: { valid: false, reason: 'no_chat_id' } }];\n\nconst chatId = String(chat.id);\n\n// ── IDENTIDAD ─────────────────────────────────────────────\n// phone: identidad en DB con prefijo de canal → 'tg:123456789'\n//        (users.phone es VARCHAR(30) genérico; 'web:<uuid>' en el futuro)\n// remoteJid: id de transporte que el nodo de envío usa para responder\nconst phone     = 'tg:' + chatId;\nconst remoteJid = chatId;\n\nconst pushName = [from.first_name, from.last_name].filter(Boolean).join(' ').trim()\n              || from.username || null;\n\n// ── IDIOMA (bonus Telegram: language_code del cliente) ────\nconst rawLang = (from.language_code || '').toLowerCase();\nconst tgLanguage = rawLang.startsWith('es') ? 'es'\n                 : rawLang.startsWith('en') ? 'en'\n                 : rawLang.startsWith('pt') ? 'pt'\n                 : null;\n\n// ── CONTENIDO DEL MENSAJE → tipos canónicos ───────────────\nlet messageText = '';\nlet messageType = 'unknown';\n\nif (message.text) {\n  messageText = message.text;\n  messageType = 'text';\n} else if (message.photo) {\n  messageText = message.caption || '[Imagen recibida]';\n  messageType = 'image';\n} else if (message.document) {\n  messageText = `[Documento recibido: ${message.document.file_name || 'archivo'}]`;\n  messageType = 'document';\n} else if (message.voice || message.audio) {\n  messageText = '[Audio recibido — función de voz próximamente]';\n  messageType = 'audio';\n} else if (message.sticker) {\n  messageText = '[Sticker]';\n  messageType = 'sticker';\n} else if (message.location) {\n  messageText = '[Ubicación recibida]';\n  messageType = 'location';\n}\n\n// Pulsación de botón: el payload viaja en callback_query.data ('consent:yes', 'mod:video'…)\nif (cbq) {\n  messageText = String(cbq.data || '').trim();\n  messageType = 'button_reply';\n}\n\nif (!messageText) {\n  return [{ json: { valid: false, reason: 'unsupported_or_empty_message', msgKeys: Object.keys(message) } }];\n}\n// ── DEDUP KEY ─────────────────────────────────────────────\n// Álbum: las N fotos comparten media_group_id → solo una ejecución procesa.\n// Mensaje normal: update_id (Telegram reusa el mismo id al reintentar webhooks).\nconst dedupKey = message.media_group_id\n  ? `alb:${chatId}:${message.media_group_id}`\n  : `upd:${chatId}:${update.update_id || message.message_id || Date.now()}`;\nreturn [{ json: {\n  valid: true,\n  channel: 'telegram',\n  phone,\n  remoteJid,\n  pushName,\n  tgLanguage,\n  messageText,\n  messageType,\n  messageId: String(message.message_id || ''),\n  callbackQueryId: cbq ? String(cbq.id || '') : null,\n  isCallback:      !!cbq,\n  dedupKey,\n  mediaGroupId: message.media_group_id || null,\n  instance: 'telegram',\n  timestamp: new Date((message.date || Math.floor(Date.now()/1000)) * 1000).toISOString()\n}}];"
       },
-      "id": "2c3b7f8d-b9cd-4b04-9821-493e154971ad",
+      "id": "247b710f-d35f-4237-b934-0a183f32a3e9",
       "name": "🔎 Extraer y Validar Mensaje",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1440,
-        256
+        -2080,
+        32
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// ALLOWLIST DEMO v1.0 — restringe respuestas a IDs autorizados.\n// VACÍA = modo abierto (todos pasan) para tus pruebas.\n// Para el demo con el CEO de Pangi: agregar los 'tg:<chat_id>' del equipo\n// (cada uno obtiene su id escribiendo a @userinfobot en Telegram).\n// ============================================================\n\nconst ALLOWED_IDS = [\n  // 'tg:123456789',   // Erick\n  // 'tg:987654321',   // el CEO de Pangi\n];\n\nconst m = $input.first().json;\nif (!m.valid) return [{ json: m }];   // ya inválido: pasa al filtro estándar\n\nif (ALLOWED_IDS.length > 0 && !ALLOWED_IDS.includes(m.phone)) {\n  console.log(`[PANGI] Bloqueado por allowlist: ${m.phone}`);\n  return [{ json: { valid: false, reason: 'not_in_allowlist', phone: m.phone } }];\n}\n\nreturn [{ json: m }];"
       },
-      "id": "c2fdd3ba-7988-4f11-8f76-0a3e39136d21",
+      "id": "d5afd39b-d5ca-4d2e-bb11-221875e9ddb1",
       "name": "🛡️ Allowlist — Filtro Demo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1200,
-        256
+        -1840,
+        32
       ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// PREPARAR ENVÍO TELEGRAM v2.0.0\n// Recibe output de NOVA, SAGE, ATLAS o nodos de consentimiento.\n// Sobre canónico → payload Telegram. Mantiene los mismos campos\n// _underscore que la versión WhatsApp para el ciclo de sesión.\n// ============================================================\n\nconst a = $json;\n\n// Safeguard sessionId (idéntico a v1 WhatsApp)\nconst rawSessionId  = a.sessionId;\nconst safeSessionId = (rawSessionId !== null && rawSessionId !== undefined &&\n                       Number.isInteger(Number(rawSessionId)) &&\n                       Number(rawSessionId) > 0)\n  ? Number(rawSessionId)\n  : null;\nif (!safeSessionId) {\n  console.error(`[PANGI] ⚠️ sessionId inválido del agente: \"${rawSessionId}\". Agent: ${a.newActiveAgent}`);\n}\n\n// Safeguard chatId — sin esto Telegram devuelve 400\nconst chatId = a.remoteJid || null;\nif (!chatId) {\n  console.error(`[PANGI] ⚠️ remoteJid/chatId ausente en output del agente: ${a.newActiveAgent}`);\n}\n\n// Texto: fallback + límite duro de Telegram (4096 chars)\nlet text = a.responseText || 'Error interno. Por favor escribe de nuevo.';\nif (text.length > 4000) text = text.slice(0, 4000) + '…';\n\nreturn [{ json: {\n  tgChatId: chatId,\n  tgText:   text,\n  _responseText:      a.responseText || '',\n  _remoteJid:         chatId,\n  _instance:          a.instance || 'telegram',\n  _userId:            a.userId,\n  _sessionId:         safeSessionId,\n  _newActiveAgent:    a.newActiveAgent  || 'NOVA',\n  _newSessionState:   a.newSessionState || 'active',\n  _newSessionContext: a.newSessionContext || {}\n}}];"
+        "jsCode": "// ============================================================\n// PREPARAR ENVÍO TELEGRAM v2.0.0\n// Recibe output de NOVA, SAGE, ATLAS o nodos de consentimiento.\n// Sobre canónico → payload Telegram. Mantiene los mismos campos\n// _underscore que la versión WhatsApp para el ciclo de sesión.\n// ============================================================\n\nconst a = $json;\n\n// Safeguard sessionId (idéntico a v1 WhatsApp)\nconst rawSessionId  = a.sessionId;\nconst safeSessionId = (rawSessionId !== null && rawSessionId !== undefined &&\n                       Number.isInteger(Number(rawSessionId)) &&\n                       Number(rawSessionId) > 0)\n  ? Number(rawSessionId)\n  : null;\nif (!safeSessionId) {\n  console.error(`[PANGI] ⚠️ sessionId inválido del agente: \"${rawSessionId}\". Agent: ${a.newActiveAgent}`);\n}\n\n// Safeguard chatId — sin esto Telegram devuelve 400\nconst chatId = a.remoteJid || null;\nif (!chatId) {\n  console.error(`[PANGI] ⚠️ remoteJid/chatId ausente en output del agente: ${a.newActiveAgent}`);\n}\n\n// Texto: fallback + límite duro de Telegram (4096 chars)\nlet text = a.responseText || 'Error interno. Por favor escribe de nuevo.';\nif (text.length > 4000) text = text.slice(0, 4000) + '…';\n\n// ── BOTONES (inline keyboard) — listo para activar ───────\n// Los agentes pueden devolver:  buttons: [{text:'Acepto', data:'consent:yes'}, …]\n// o por filas:                  buttons: [[{…},{…}],[{…}]]\n// Si no los envían, tgReplyMarkup queda '' y el envío se comporta igual que hoy.\nconst _btns = Array.isArray(a.buttons) && a.buttons.length ? a.buttons : null;\nconst _rows = _btns ? (Array.isArray(_btns[0]) ? _btns : _btns.map(b => [b])) : null;\nconst tgReplyMarkup = _rows\n  ? JSON.stringify({ inline_keyboard: _rows.map(r => r.map(b => ({\n      text:          String(b.text || '').slice(0, 64),\n      callback_data: String(b.data || b.text || '').slice(0, 64)\n    }))) })\n  : '';\n\nreturn [{ json: {\n  tgChatId: chatId,\n  tgText:   text,\n  tgReplyMarkup,\n  _responseText:      a.responseText || '',\n  _remoteJid:         chatId,\n  _instance:          a.instance || 'telegram',\n  _userId:            a.userId,\n  _sessionId:         safeSessionId,\n  _newActiveAgent:    a.newActiveAgent  || 'NOVA',\n  _newSessionState:   a.newSessionState || 'active',\n  _newSessionContext: a.newSessionContext || {}\n}}];"
       },
-      "id": "ef3d3819-c70a-4ff1-8271-894fe48f756f",
+      "id": "a3f17185-181c-4479-bf7f-f6e52b16e129",
       "name": "📤 Preparar Envío Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1312,
-        560
+        688,
+        336
       ]
     },
     {
@@ -72,13 +72,13 @@
           "parse_mode": "Markdown"
         }
       },
-      "id": "5d504bf7-54a8-46e7-9e34-a34aad49063b",
+      "id": "68881734-1990-4e3f-89b8-b0b91c1401f0",
       "name": "📨 Telegram — Enviar Respuesta",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1552,
-        560
+        928,
+        336
       ],
       "webhookId": "964daef6-0297-4c0e-8a78-e75444768cb8",
       "retryOnFail": false,
@@ -113,26 +113,26 @@
         },
         "options": {}
       },
-      "id": "9f79ba49-3c5d-4e65-9f61-f5e9a847a3a3",
+      "id": "8812dee5-ec7d-4e52-9481-bef035f09524",
       "name": "⚠️ ¿Falló el Envío?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1792,
-        560
+        1168,
+        336
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// FALLBACK TEXTO PLANO v1.0\n// Markdown v1 de Telegram rechaza mensajes con entidades\n// desbalanceadas (*, _, `). Si el envío falló, reintenta con\n// el texto limpio de caracteres de formato.\n// ============================================================\nconst prep  = $('📤 Preparar Envío Telegram').first().json;\nconst plain = (prep.tgText || '').replace(/[*_`\\[\\]]/g, '');\nconsole.log(`[PANGI] Reintentando envío en texto plano para chat ${prep.tgChatId}`);\nreturn [{ json: { tgChatId: prep.tgChatId, tgText: plain } }];"
       },
-      "id": "999d945c-9c99-401f-a8c7-ebe80a3fa22b",
+      "id": "e4f8b0e6-3a04-4b0a-95f6-35eed89af12d",
       "name": "🧹 Fallback — Texto Plano",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2032,
-        448
+        1408,
+        224
       ]
     },
     {
@@ -143,13 +143,13 @@
           "appendAttribution": false
         }
       },
-      "id": "fabd1af0-d7b8-42a1-a9c1-e4f589efaddc",
+      "id": "d27cded1-ee45-4dfb-a1d5-e8c5638ce002",
       "name": "📨 Telegram — Reenviar Plano",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        2256,
-        448
+        1632,
+        224
       ],
       "webhookId": "70369934-73ee-4e2c-9118-daf67311232b",
       "retryOnFail": false,
@@ -184,26 +184,26 @@
         },
         "options": {}
       },
-      "id": "9aa354a5-3e22-479b-9274-a7d0f48141ee",
+      "id": "66acc654-6571-4ca2-9df6-899f16ca4833",
       "name": "✅ ¿Mensaje Procesable?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -960,
-        256
+        -1600,
+        32
       ]
     },
     {
       "parameters": {
         "jsCode": "// Mensajes filtrados silenciosamente.\n// Esto es intencional: no queremos responder a bots,\n// grupos, estados, ni mensajes propios.\nconst reason = $json.reason || 'unknown';\nconsole.log(`[PANGI] Mensaje ignorado. Razón: ${reason}`);\nreturn [{ json: { ignored: true, reason } }];"
       },
-      "id": "cd9cb8a1-ed59-48b3-afe8-fadce91143a1",
+      "id": "eb35d5aa-7e00-4fe3-8a43-3862009a8813",
       "name": "🚫 Ignorar — No Procesable",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        0,
-        272
+        -640,
+        48
       ]
     },
     {
@@ -211,26 +211,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "688ac1be-77d5-4420-a62e-8dda5d2c9e4f",
+      "id": "9f04f21b-b10d-4ef5-8eb5-ecb42c1c7e27",
       "name": "🗄️ DB — Usuario",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        240,
-        0
+        -400,
+        -224
       ]
     },
     {
       "parameters": {
         "jsCode": "const userId = $('🗄️ DB — Usuario').first().json.data[0].id;\nreturn [{ json: {\n  operation: 'getActiveSession',\n  params: { userId }\n}}];"
       },
-      "id": "34b9552e-c756-4ec7-804c-c9a61f4b8773",
+      "id": "9b849cfd-dc77-4d9f-96a3-73854f68a59c",
       "name": "📦 Payload — getActiveSession",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        480,
-        0
+        -160,
+        -224
       ]
     },
     {
@@ -238,13 +238,13 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "32254454-b547-4716-a9fd-b0bce6a91c0c",
+      "id": "d2330429-c387-4f1f-8102-ffa1028f8a81",
       "name": "🗄️ DB — Sesión Activa",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        320,
-        320
+        -320,
+        96
       ]
     },
     {
@@ -272,39 +272,39 @@
         },
         "options": {}
       },
-      "id": "48a170e7-4dbe-451a-abc1-8add49c9d2dd",
+      "id": "6fbc1899-4c4c-493f-a481-6ceaf945b4a1",
       "name": "✅ ¿Sesión Existe?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        560,
-        320
+        -80,
+        96
       ]
     },
     {
       "parameters": {
         "jsCode": "// TRUE path: sesión activa encontrada en DB\nconst session  = $('🗄️ DB — Sesión Activa').first().json.data[0];\nconst userData = $('🗄️ DB — Usuario').first().json.data[0];\nconst msgData  = $('🔎 Extraer y Validar Mensaje').first().json;\n\n// Extraer context como variable para reutilizar en userLanguage\nconst sessionContext = typeof session.context === 'string'\n  ? JSON.parse(session.context || '{}')\n  : (session.context || {});\n\nreturn [{ json: {\n  userId:         userData.id,\n  userName:       userData.name || msgData.pushName || null,\n  userLanguage:   sessionContext.language || userData.language || 'es',\n  userPhone:      userData.phone,\n  sessionId:      session.id,\n  activeAgent:    session.active_agent,\n  sessionState:   session.state,\n  sessionContext,\n  isNewSession:   false,\n  messageText:    msgData.messageText,\n  messageType:    msgData.messageType,\n  remoteJid:      msgData.remoteJid,\n  instance:       msgData.instance\n}}];"
       },
-      "id": "f9158994-7922-4e85-9385-a3242d66b62f",
+      "id": "7db19d2c-0425-4873-ab1a-4be478fbb332",
       "name": "🔧 Normalizar — Sesión Existente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1040,
-        16
+        416,
+        -208
       ]
     },
     {
       "parameters": {
         "jsCode": "// FALSE path: no hay sesión, la creamos con NOVA como agente inicial\nconst userId = $('🗄️ DB — Usuario').first().json.data[0].id;\nreturn [{ json: {\n  operation: 'createSession',\n  params: { userId, agent: 'NOVA', state: 'initial', context: {} }\n}}];"
       },
-      "id": "f13aba14-4c46-4325-a01f-457eaf7580de",
+      "id": "b06c42e7-fbe7-4d68-8860-bb82515411bc",
       "name": "📦 Payload — createSession",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        832,
-        336
+        208,
+        112
       ]
     },
     {
@@ -312,39 +312,39 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "95d1bc77-fbf4-4262-9820-9a379feed10e",
+      "id": "889681a2-1b4e-47b4-a31b-a122787c84e9",
       "name": "🗄️ DB — Crear Sesión",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1072,
-        336
+        448,
+        112
       ]
     },
     {
       "parameters": {
         "jsCode": "// FALSE path: sesión recién creada (o recuperada por ON CONFLICT)\nconst sessionResult = $('🗄️ DB — Crear Sesión').first().json;\nconst session       = sessionResult.data?.[0];\nconst userData      = $('🗄️ DB — Usuario').first().json.data?.[0];\nconst msgData       = $('🔎 Extraer y Validar Mensaje').first().json;\n\n// Guard — si llegamos aquí sin sesión, hay un problema upstream no detectado\nif (!userData) {\n  throw new Error(\n    `[PANGI] USER_NOT_FOUND — remoteJid: ${msgData?.remoteJid ?? 'desconocido'}`\n  );\n}\nif (!session) {\n  // Con Fix 1 (ON CONFLICT) esto no debería ocurrir nunca.\n  // Si ocurre, significa que DB_MANAGER retornó success:false y llegó aquí igual.\n  throw new Error(\n    `[PANGI] SESSION_CREATE_FAILED — ` +\n    `userId: ${userData.id} | ` +\n    `error: ${sessionResult.error ?? 'unknown'} | ` +\n    `detail: ${sessionResult._meta?.pgDetail ?? sessionResult.message ?? 'sin detalle'}`\n  );\n}\n\nreturn [{ json: {\n  userId:         userData.id,\n  userName:       userData.name || msgData.pushName || null,\n  userLanguage:   userData.language || 'es',\n  userPhone:      userData.phone,\n  sessionId:      session.id,\n  activeAgent:    session.active_agent,\n  sessionState:   session.state,\n  sessionContext: typeof session.context === 'string'\n                    ? JSON.parse(session.context || '{}')\n                    : (session.context || {}),\n  isNewSession:   true,\n  messageText:    msgData.messageText,\n  messageType:    msgData.messageType,\n  remoteJid:      msgData.remoteJid,\n  instance:       msgData.instance\n}}];"
       },
-      "id": "bad24e52-5317-4ae7-aef4-57c1088a93bf",
+      "id": "8c15c8b6-d115-4288-b8f9-8a27853e54be",
       "name": "🔧 Normalizar — Sesión Nueva",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1312,
-        336
+        688,
+        112
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Este nodo recibe data de CUALQUIERA de los dos Normalizar nodes.\n// $json contiene el contexto unificado de la sesión.\nconst s = $json;\n\n// ── DEDUPLICACIÓN: evitar procesar el mismo mensaje dos veces en <5s ─────────\nconst now      = Date.now();\nconst msgText  = (s.messageText || '').trim();\nconst lastAt   = s.sessionContext?._last_msg_at   || 0;\nconst lastText = (s.sessionContext?._last_msg_text || '').trim();\n\nif (msgText && msgText === lastText && (now - lastAt) < 5000) {\n  return []; // Mensaje duplicado en ventana de 5s — detener flujo\n}\n// ─────────────────────────────────────────────────────────────────────────────\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      s.userId,\n    sessionId:   s.sessionId,\n    agent:       s.activeAgent,\n    role:        'user',\n    message:     s.messageText,\n    messageType: s.messageType\n  },\n  // Transportar contexto de sesión para nodos posteriores\n  _session: {\n    userId:         s.userId,\n    userName:       s.userName,\n    userLanguage:   s.userLanguage,\n    userPhone:      s.userPhone,\n    sessionId:      s.sessionId,\n    activeAgent:    s.activeAgent,\n    sessionState:   s.sessionState,\n    sessionContext: {\n      ...s.sessionContext,\n      _last_msg_at:   now,\n      _last_msg_text: msgText,\n      _pending_intent: s.sessionContext?._pending_intent || null\n    },\n    isNewSession:   s.isNewSession,\n    messageText:    s.messageText,\n    messageType:    s.messageType,\n    remoteJid:      s.remoteJid,\n    instance:       s.instance\n  }\n}}];"
+        "jsCode": "// Este nodo recibe data de CUALQUIERA de los dos Normalizar nodes.\n// $json contiene el contexto unificado de la sesión.\nconst s = $json;\n\n// ── DEDUPLICACIÓN: evitar procesar el mismo mensaje dos veces en <5s ─────────\nconst now      = Date.now();\nconst msgText  = (s.messageText || '').trim();\nconst lastAt   = s.sessionContext?._last_msg_at   || 0;\nconst lastText = (s.sessionContext?._last_msg_text || '').trim();\n\n// [r4 · RESTAURADO en r8] Se ELIMINA la deduplicación por TEXTO: devolvía [] cuando el\n// usuario repetía un input legítimo (\"1\" para modalidad y luego \"1\" para el especialista),\n// deteniendo el workflow sin respuesta. La dedup real por message_id ya ocurre antes\n// (checkDedup con ON CONFLICT atómico) y cubre los webhooks duplicados de Telegram.\n// _last_msg_at/_last_msg_text se conservan abajo solo como metadatos.\n// ─────────────────────────────────────────────────────────────────────────────\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      s.userId,\n    sessionId:   s.sessionId,\n    agent:       s.activeAgent,\n    role:        'user',\n    message:     s.messageText,\n    messageType: s.messageType\n  },\n  // Transportar contexto de sesión para nodos posteriores\n  _session: {\n    userId:         s.userId,\n    userName:       s.userName,\n    userLanguage:   s.userLanguage,\n    userPhone:      s.userPhone,\n    sessionId:      s.sessionId,\n    activeAgent:    s.activeAgent,\n    sessionState:   s.sessionState,\n    sessionContext: {\n      ...s.sessionContext,\n      _last_msg_at:   now,\n      _last_msg_text: msgText,\n      _pending_intent: s.sessionContext?._pending_intent || null\n    },\n    isNewSession:   s.isNewSession,\n    messageText:    s.messageText,\n    messageType:    s.messageType,\n    remoteJid:      s.remoteJid,\n    instance:       s.instance\n  }\n}}];"
       },
-      "id": "f2d2bfbc-9e14-47b9-8006-44b0d9a2c11f",
+      "id": "c893c08d-41e6-46d3-9a23-6196d0040b24",
       "name": "📦 Payload — Guardar Mensaje Entrante",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1584,
-        336
+        960,
+        112
       ]
     },
     {
@@ -352,26 +352,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "dd265fad-5258-4148-8776-103e70555b8d",
+      "id": "f9aebd75-3ead-486c-8e96-a1cdba5e886e",
       "name": "🗄️ DB — Guardar Mensaje Entrante",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1792,
-        336
+        1168,
+        112
       ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// INTENT ROUTER v2.3.0 — Multilingüe (ES + EN + PT)\n// Fix v2.3.0:\n//   - ctx declarado antes de sessionLang (ReferenceError fix)\n//   - Consent requiere hasExplicitYes (no acepta \"Hello\" como consent)\n//   - sessionLang ignorado durante awaiting_consent (lang por mensaje)\n//   - detectLanguage ampliado: 'hi', 'hey', 'yes', 'sim', etc.\n// ============================================================\n\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst normalize   = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();\nconst txtN        = normalize(session.messageText || '');\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── DETECCIÓN DE IDIOMA ──────────────────────────────────────\nconst detectLanguage = (text) => {\n  const t = ' ' + text + ' ';\n  const PT = [\n    'não ','você','obrigad','olá','boa tarde','boa noite','bom dia',' oi ',' sim ',\n    'posso','também','então','cotação','preço','quanto custa','cirurgia',\n    'procedimento','viagem','hospedagem','dentista','dente','clareamento',\n    'lipoaspiração','mamoplastia','alinhador'\n  ];\n  const EN = [\n    ' the ',' is ',' are ',' my ',\n    ' want',' need',' have',' has ',\n    \"i'm \",\"i'd \",\"don't\",\"can't\",\"won't\",\"i'll\",\"i've \",\"i was \",\"i am \",\n    ' what ',' how ',' where ',' does ',\n    'hello','good morning','good afternoon','good evening','good night',\n    ' hi ', ' hey ',\n    'quote','price','surgery','dental work','tooth','teeth',\n    'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation',\n    'breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n    'appointment','schedule','book ','booking','see a doctor','accommodation','lodging'\n  ];\n  const ES = ['hola', ' gracias', 'buenos ', 'buenas', ' qué ', 'cotizar', 'cotización', 'agendar', 'por favor', 'español'];\n  if (PT.some(m => t.includes(m))) return 'pt';\n  if (EN.some(m => t.includes(m))) return 'en';\n  if (ES.some(m => t.includes(m))) return 'es';\n  return null;\n};\n\n// ── ctx debe declararse ANTES de sessionLang ─────────────────\nconst ctx = session.sessionContext || {};\n\n// ── FIX v2.3.0: durante consent, re-detectar idioma por mensaje\n// Fuera del consent, respetar idioma guardado en sesión.\nconst sessionLang      = ctx.awaiting_consent ? null : (session.sessionContext?.language || null);\nconst freshDetect      = detectLanguage(txt);\nconst detectedLanguage = sessionLang\n  ? sessionLang\n  : (freshDetect || session.userLanguage || 'es');\nconst out = (extra) => ({ json: { ...session, detectedLanguage, ...extra } });\n\n// Si el turno anterior guardó un pendingHandoff (ej: intención detectada en primer mensaje)\n// lo procesamos aquí antes que cualquier otra lógica\nconst ctxPendingHandoff = ctx.pendingHandoff || null;\nconst ctxPendingMessage = ctx.pendingMessage || null;\nif (ctxPendingHandoff && ctx.consent_given) {\n  return [out({\n    targetAgent:     'NOVA',\n    intentDetected:  ctxPendingHandoff === 'SAGE' ? 'cotizar_keyword' : ctxPendingHandoff === 'ATLAS' ? 'comparar_keyword' : 'agendar_keyword',\n    pendingHandoff:  ctxPendingHandoff,\n    pendingMessage:  ctxPendingMessage\n  })];\n}\n\n// ── CONSENT CHECK ─────────────────────────────────────────────\nif (!ctx.consent_given) {\n  if (ctx.awaiting_consent) {\n    // v2.4: normalizar tildes ANTES del regex — \\b de JS no funciona con acentos\n    // v2.4.1: el NO se evalúa PRIMERO — una negación que contiene palabra\n    // afirmativa (\"no acepto\", \"I don't accept\") es rechazo, no aceptación.\n    const txtNC = txt.trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n    const hasExplicitNo =\n      /\\b(no+|nao)[\\s,.!¡¿?]*$/.test(txtNC) ||\n      /\\b(no|nunca|jamas|nao|not|don['’]?t|do not|doesn['’]?t)\\b[\\s\\w'’]*\\b(acepto|aceptar|quiero|deseo|autorizo|accept|agree|aceito|concordo|continuar|continue)\\b/.test(txtNC) ||\n      /\\b(rechazo|rechazar|refuse|reject|decline|deny|recuso|cancelar|cancel)\\b/.test(txtNC);\n    const hasExplicitYes = !hasExplicitNo &&\n      /\\b(si|yes|sim|ok|dale|claro|acepto|aceptar|continuar|continue|adelante|de acuerdo|confirmo|por supuesto|sure|aceito|concordo|accept|agree|esta bien)\\b/.test(txtNC);\n\n    if (hasExplicitNo) {\n      return [out({ targetAgent: 'CONSENT_REFUSED', intentDetected: 'consent_refused', pendingHandoff: null })];\n    }\n    if (hasExplicitYes) {\n      return [out({ targetAgent: 'CONSENT_ACCEPTED', intentDetected: 'consent_accepted', pendingHandoff: null })];\n    }\n    // Respuesta ambigua (ej: \"Hello\", \"ho\", \"?\") → re-mostrar aviso en idioma detectado\n    return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent_reask', pendingHandoff: null })];\n  }\n  return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent', pendingHandoff: null })];\n}\n\n// ── SAFETY: SAGE en Q&A activo → siempre continuar ───────────\nconst sageQAStates = ['gathering_profile','procedure_confirmed','questioning','summary','waiting_for_confirmation'];\nconst sageCtxState = session.sessionContext?.sage?.state || '';\nif (activeAgent === 'SAGE' && sageQAStates.includes(sageCtxState) && !isNew) {\n  return [out({ targetAgent: 'SAGE', intentDetected: 'sage_qa_active', pendingHandoff: null })];\n}\n\n// ── KW_SALUDO — definido ANTES de REGLA 1 ────────────────────\nconst KW_SALUDO = [\n  'hola','buenos días','buenas tardes','buenas noches','buenas','inicio','empezar','comenzar','iniciar',\n  'hello','hi ','hey ','good morning','good afternoon','good evening','good night','start','begin',\n  'olá ','oi ','bom dia','boa tarde','boa noite','começar','ajuda','informação','informacao'\n];\nconst hasSaludo = KW_SALUDO.some(kw => txtN.includes(normalize(kw)));\n// ── SAFETY: NOVA en flujo de agendamiento activo → continuar ──\n// Un flujo a medias no se abandona por keywords; solo \"hola\" (reset) escapa.\nconst novaSchedState = session.sessionContext?.nova?.state || '';\nif (activeAgent === 'NOVA' && novaSchedState.startsWith('sched_') && !hasSaludo) {\n  return [out({ targetAgent: 'NOVA', intentDetected: 'sched_active', pendingHandoff: null })];\n}\n\n// ── REGLA 1: Respetar agente activo — EXCEPTO saludos ────────\nconst hasExplicitAtlas = /^(atlas|comparar?|compare|destinos?|destinations?|quiero comparar|i want to compare|want to compare|quero comparar|ver destinos)$/i.test(txt);\nconst hasExplicitSage  = /^(sage|cotizar|cotar|nueva solicitud|new request|nova cotacao)$/i.test(txt);\nif (activeAgent === 'SAGE'  && !isNew && !hasSaludo && !hasExplicitAtlas) return [out({ targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null })];\nif (activeAgent === 'ATLAS' && !isNew && !hasSaludo && !hasExplicitSage)  return [out({ targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null })];\n\n// ── REGLA 2: Botones interactivos ────────────────────────────\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt.includes('quote')    || txt.includes('cotar'))    return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  })];\n  if (txt.includes('comparar') || txt.includes('compare') || txt.includes('comparar')) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' })];\n  if (txt.includes('agendar')  || txt.includes('schedule') || txt.includes('agendar')) return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   })];\n  return [out({ targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null })];\n}\n\n// ── REGLA 3: Keywords trilingüe ──────────────────────────────\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela',\n  'carie','caries','dolor de muela','dolor dental','me duele','empaste',\n  'relleno','funda','corona','sarro','encia','encías','sangrado',\n  'nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'quote','how much','price','rate','fee',\n  'tooth','teeth','implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'procedure','surgery','treatment','dental work','dental procedure',\n  'cotação','preço','quanto custa','quanto é','valor do',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','abdominoplastia','mamoplastia','aumento de seios','redução mamária','bichectomia','blefaroplastia','lifting facial',\n  'procedimento','cirurgia','dentista','dente','molar','tratamento dental'\n];\nconst KW_COMPARAR = [\n  'comparar','comparacion','comparativa','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena','perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami','cancún','cancun','ciudad de mexico','santo domingo',\n  'compare','comparison','destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'comparar','comparação','viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','disponibilidad','horario','me atiendan','consulta',\n  'appointment','schedule','book ','booking','see a doctor','availability','available','make an appointment','want to see',\n  'marcar consulta','marcar uma','reservar consulta','disponibilidade','atendimento','quero consulta'\n];\n\n// v2.4: match por INICIO DE PALABRA (\\b + prefijo), nunca substring libre.\n// 'encia' ya no matchea \"presencial\"; 'lima' sigue matcheando \"Lima\".\nconst kwHit = (list) => list.some(kw => {\n  const k = normalize(kw).trim();\n  if (!k) return false;\n  return new RegExp('\\\\b' + k.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).test(txtN);\n});\nconst hasCotizar  = kwHit(KW_COTIZAR);\nconst hasComparar = kwHit(KW_COMPARAR);\nconst hasAgendar  = kwHit(KW_AGENDAR);\n\nif (hasCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_keyword',  pendingHandoff: 'SAGE'  })];\nif (hasComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_keyword', pendingHandoff: 'ATLAS' })];\nif (hasAgendar)  return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_keyword',  pendingHandoff: null   })];\nif (hasSaludo)   return [out({ targetAgent: 'NOVA', intentDetected: 'saludo',           pendingHandoff: null   })];\n\nreturn [out({ targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null })];\n"
+        "jsCode": "// ============================================================\n// INTENT ROUTER v2.3.0 — Multilingüe (ES + EN + PT)\n// Fix v2.3.0:\n//   - ctx declarado antes de sessionLang (ReferenceError fix)\n//   - Consent requiere hasExplicitYes (no acepta \"Hello\" como consent)\n//   - sessionLang ignorado durante awaiting_consent (lang por mensaje)\n//   - detectLanguage ampliado: 'hi', 'hey', 'yes', 'sim', etc.\n// ============================================================\n\nconst session = $('📦 Payload — Guardar Mensaje Entrante').first().json._session;\n\nconst txt         = (session.messageText || '').toLowerCase().trim();\nconst normalize   = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();\nconst txtN        = normalize(session.messageText || '');\nconst msgType     = session.messageType;\nconst activeAgent = session.activeAgent;\nconst isNew       = session.isNewSession;\n\n// ── DETECCIÓN DE IDIOMA ──────────────────────────────────────\nconst detectLanguage = (text) => {\n  const t = ' ' + text + ' ';\n  const PT = [\n    'não ','você','obrigad','olá','boa tarde','boa noite','bom dia',' oi ',' sim ',\n    'posso','também','então','cotação','preço','quanto custa','cirurgia',\n    'procedimento','viagem','hospedagem',' dente ','clareamento',\n    'lipoaspiração','mamoplastia','alinhador'\n  ];\n  const EN = [\n    ' the ',' is ',' are ',' my ',\n    ' want',' need',' have',\n    \"i'm \",\"i'd \",\"don't\",\"can't\",\"won't\",\"i'll\",\"i've \",\"i was \",\"i am \",\n    ' what ',' how ',' where ',' does ',\n    'hello','good morning','good afternoon','good evening','good night',\n    ' hi ', ' hey ',\n    'quote','price','surgery','dental work','tooth','teeth',\n    'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation',\n    'breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n    'appointment','schedule','book ','booking','see a doctor','accommodation','lodging'\n  ];\n  const ES = [\n    'hola',' gracias','buenos ','buenas',' qué ','cotizar','cotización','agendar','por favor','español',\n    ' quiero',' quisiera',' necesito',' tengo ',' puedes',' tienes',' sabes ',' me duele','muela','diente',\n    ' años',' ciudad',' cita',' usted',' también',' mañana',' ahora ',' cuánto',' dónde',' cómo',' está bien',\n    ' ninguna',' ninguno',' mucho ',' muy ',' pero '\n  ];\n  // Decisión por CONTEO de señales (antes: prioridad fija PT>EN>ES, así un solo\n  // falso positivo portugués ganaba sobre cinco señales claras de español).\n  const cnt = (L) => L.filter(m => t.includes(m)).length;\n  const cPT = cnt(PT), cEN = cnt(EN), cES = cnt(ES);\n  if (cPT === 0 && cEN === 0 && cES === 0) return null;\n  if (cES >= cPT && cES >= cEN) return 'es';\n  if (cPT >= cEN) return 'pt';\n  return 'en';\n};\n\n// ── ctx debe declararse ANTES de sessionLang ─────────────────\nconst ctx = session.sessionContext || {};\n\n// ── FIX v2.3.0: durante consent, re-detectar idioma por mensaje\n// Fuera del consent, respetar idioma guardado en sesión.\n// OVERRIDE EXPLÍCITO: el usuario siempre puede cambiar el idioma a mano. Gana sobre el\n// idioma guardado (antes quedaba bloqueado para toda la sesión y \"en español por favor\"\n// no tenía ningún efecto). Los agentes persisten detectedLanguage en ctx.language.\nconst LANG_OVERRIDE = (() => {\n  if (/(en espanol|en castellano|habla espanol|hablame en espanol|hablemos en espanol|espanol por favor|in spanish|spanish please|cambia a espanol|responde en espanol)/.test(txtN)) return 'es';\n  if (/(in english|english please|speak english|talk in english|en ingles|habla ingles|cambia a ingles|switch to english|answer in english)/.test(txtN)) return 'en';\n  if (/(em portugues|portugues por favor|fala portugues|falar em portugues|in portuguese|mude para portugues|responda em portugues)/.test(txtN)) return 'pt';\n  return null;\n})();\nconst sessionLang      = ctx.awaiting_consent ? null : (session.sessionContext?.language || null);\nconst freshDetect      = detectLanguage(txt);\nconst detectedLanguage = LANG_OVERRIDE\n  ? LANG_OVERRIDE\n  : (sessionLang ? sessionLang : (freshDetect || session.userLanguage || 'es'));\nconst out = (extra) => ({ json: { ...session, detectedLanguage, ...extra } });\n\n// Si el turno anterior guardó un pendingHandoff (ej: intención detectada en primer mensaje)\n// lo procesamos aquí antes que cualquier otra lógica\nconst ctxPendingHandoff = ctx.pendingHandoff || null;\nconst ctxPendingMessage = ctx.pendingMessage || null;\n// CINTURÓN ANTI-BUCLE: si el agente activo YA es el destino del handoff, éste ya se\n// ejecutó y el flag quedó huérfano en un contexto viejo → ignorarlo (antes: el router\n// lo re-disparaba en CADA turno con prioridad máxima → \"¿Listo para empezar?\" infinito).\nconst _phStale = ctxPendingHandoff && activeAgent === ctxPendingHandoff;\nif (ctxPendingHandoff && ctx.consent_given && !_phStale) {\n  return [out({\n    targetAgent:     'NOVA',\n    intentDetected:  ctxPendingHandoff === 'SAGE' ? 'cotizar_keyword' : ctxPendingHandoff === 'ATLAS' ? 'comparar_keyword' : 'agendar_keyword',\n    pendingHandoff:  ctxPendingHandoff,\n    pendingMessage:  ctxPendingMessage\n  })];\n}\n\n// ── CONSENT CHECK ─────────────────────────────────────────────\nif (!ctx.consent_given) {\n  if (ctx.awaiting_consent) {\n    // v2.4: normalizar tildes ANTES del regex — \\b de JS no funciona con acentos\n    // v2.4.1: el NO se evalúa PRIMERO — una negación que contiene palabra\n    // afirmativa (\"no acepto\", \"I don't accept\") es rechazo, no aceptación.\n    const txtNC = txt.trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n    const hasExplicitNo =\n      /\\b(no+|nao)[\\s,.!¡¿?]*$/.test(txtNC) ||\n      /\\b(no|nunca|jamas|nao|not|don['’]?t|do not|doesn['’]?t)\\b[\\s\\w'’]*\\b(acepto|aceptar|quiero|deseo|autorizo|accept|agree|aceito|concordo|continuar|continue)\\b/.test(txtNC) ||\n      /\\b(rechazo|rechazar|refuse|reject|decline|deny|recuso|cancelar|cancel)\\b/.test(txtNC);\n    const hasExplicitYes = !hasExplicitNo &&\n      /\\b(si|yes|sim|ok|dale|claro|acepto|aceptar|continuar|continue|adelante|de acuerdo|confirmo|por supuesto|sure|aceito|concordo|accept|agree|esta bien)\\b/.test(txtNC);\n\n    if (hasExplicitNo) {\n      return [out({ targetAgent: 'CONSENT_REFUSED', intentDetected: 'consent_refused', pendingHandoff: null })];\n    }\n    if (hasExplicitYes) {\n      return [out({ targetAgent: 'CONSENT_ACCEPTED', intentDetected: 'consent_accepted', pendingHandoff: null })];\n    }\n    // Respuesta ambigua (ej: \"Hello\", \"ho\", \"?\") → re-mostrar aviso en idioma detectado\n    return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent_reask', pendingHandoff: null })];\n  }\n  return [out({ targetAgent: 'CONSENT', intentDetected: 'needs_consent', pendingHandoff: null })];\n}\n\n// ── SAFETY: SAGE en Q&A activo → siempre continuar ───────────\nconst sageQAStates = ['gathering_profile','procedure_confirmed','questioning','summary','waiting_for_confirmation'];\nconst sageCtxState = session.sessionContext?.sage?.state || '';\nif (activeAgent === 'SAGE' && sageQAStates.includes(sageCtxState) && !isNew) {\n  return [out({ targetAgent: 'SAGE', intentDetected: 'sage_qa_active', pendingHandoff: null })];\n}\n\n// ── KW_SALUDO — definido ANTES de REGLA 1 ────────────────────\nconst KW_SALUDO = [\n  'hola','buenos días','buenas tardes','buenas noches','buenas','inicio','empezar','comenzar','iniciar',\n  'hello','hi ','hey ','good morning','good afternoon','good evening','good night','start','begin',\n  'olá ','oi ','bom dia','boa tarde','boa noite','começar','ajuda','informação','informacao'\n];\nconst hasSaludo = KW_SALUDO.some(kw => txtN.includes(normalize(kw)));\n// ── SAFETY: NOVA en flujo de agendamiento activo → continuar ──\n// Un flujo a medias no se abandona por keywords; solo \"hola\" (reset) escapa.\nconst novaSchedState = session.sessionContext?.nova?.state || '';\nif (activeAgent === 'NOVA' && novaSchedState.startsWith('sched_') && !hasSaludo) {\n  return [out({ targetAgent: 'NOVA', intentDetected: 'sched_active', pendingHandoff: null })];\n}\n\n// ── REGLA 1: Respetar agente activo — EXCEPTO saludos ────────\nconst hasExplicitAtlas = /^(atlas|comparar?|compare|destinos?|destinations?|quiero comparar|i want to compare|want to compare|quero comparar|ver destinos)$/i.test(txt);\nconst hasExplicitSage  = /^(sage|cotizar|cotar|nueva solicitud|new request|nova cotacao)$/i.test(txt);\nif (activeAgent === 'SAGE'  && !isNew && !hasSaludo && !hasExplicitAtlas) return [out({ targetAgent: 'SAGE',  intentDetected: 'continue_sage',  pendingHandoff: null })];\nif (activeAgent === 'ATLAS' && !isNew && !hasSaludo && !hasExplicitSage)  return [out({ targetAgent: 'ATLAS', intentDetected: 'continue_atlas', pendingHandoff: null })];\n\n// ── REGLA 2: Botones interactivos ────────────────────────────\nif (msgType === 'button_reply') {\n  if (txt.includes('cotizar') || txt.includes('quote')    || txt.includes('cotar'))    return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_button',  pendingHandoff: 'SAGE'  })];\n  if (txt.includes('comparar') || txt.includes('compare') || txt.includes('comparar')) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_button', pendingHandoff: 'ATLAS' })];\n  if (txt.includes('agendar')  || txt.includes('schedule') || txt.includes('agendar')) return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_button',  pendingHandoff: null   })];\n  return [out({ targetAgent: 'NOVA', intentDetected: 'unknown_button', pendingHandoff: null })];\n}\n\n// ── REGLA 3: Keywords trilingüe ──────────────────────────────\nconst KW_COTIZAR = [\n  'cotiz','precio','cuánto','cuanto','costo','tarifa',\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'procedimiento','cirugía','cirugia','dental','dentista','diente','muela',\n  'carie','caries','dolor de muela','dolor dental','me duele','empaste',\n  'relleno','funda','corona','sarro','encia','encías','sangrado',\n  'nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'quote','how much','price','rate','fee',\n  'tooth','teeth','implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'procedure','surgery','treatment','dental work','dental procedure',\n  'cotação','preço','quanto custa','quanto é','valor do',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','abdominoplastia','mamoplastia','aumento de seios','redução mamária','bichectomia','blefaroplastia','lifting facial',\n  'procedimento','cirurgia','dentista','dente','molar','tratamento dental'\n];\nconst KW_COMPARAR = [\n  'comparar','comparacion','comparativa','destino','viajar','viaje','vuelo','hotel','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'méxico','mexico','colombia','bogotá','bogota','medellín','medellin','cartagena','perú','peru','lima','costa rica','argentina','buenos aires','dominicana','miami','cancún','cancun','ciudad de mexico','santo domingo',\n  'compare','comparison','destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'comparar','comparação','viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\nconst KW_AGENDAR = [\n  'agendar','cita','reservar','agenda','turno','disponibilidad','horario','me atiendan','consulta',\n  'appointment','schedule','book ','booking','see a doctor','availability','available','make an appointment','want to see',\n  'marcar consulta','marcar uma','reservar consulta','disponibilidade','atendimento','quero consulta'\n];\n\n// v2.5: match por INICIO DE PALABRA (\\b + prefijo), nunca substring libre.\nconst kwHit = (list) => list.some(kw => {\n  const k = normalize(kw).trim();\n  if (!k) return false;\n  return new RegExp('\\\\b' + k.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).test(txtN);\n});\n\n// ── CAPA 1: VERBOS DE ACCIÓN (deciden la intención; el tema es solo contexto) ──\n// Un verbo de acción explícito gana SIEMPRE sobre keywords de tema (procedimiento/ciudad).\n// Esto evita que \"agendar cirugía plástica en Lima\" se lea como cotizar (cirugía) o comparar (Lima).\nconst KW_VERB_AGENDAR = [\n  'agendar','agende','agenda','reservar','reserva','cita','turno','me atiendan',\n  'schedule','book','booking','appointment','make an appointment','want to see','see a doctor',\n  'marcar consulta','marcar uma','reservar consulta','quero consulta','agendar consulta'\n];\nconst KW_VERB_COTIZAR = [\n  'cotizar','cotiza','cotizacion','cotización','presupuesto','quiero cotizar','nueva solicitud',\n  'quote','get a quote','new request',\n  'cotar','cotação','orçamento','quero cotar'\n];\nconst KW_VERB_COMPARAR = [\n  'comparar','compara','comparacion','comparación','comparativa','quiero comparar',\n  'compare','comparison','i want to compare',\n  'comparação','quero comparar'\n];\n\nconst verbAgendar  = kwHit(KW_VERB_AGENDAR);\nconst verbCotizar  = kwHit(KW_VERB_COTIZAR);\nconst verbComparar = kwHit(KW_VERB_COMPARAR);\nconst verbCount    = [verbAgendar, verbCotizar, verbComparar].filter(Boolean).length;\n\n// Exactamente UN verbo de acción → decisión inequívoca, gana el verbo.\nif (verbCount === 1) {\n  if (verbAgendar)  return [out({ targetAgent: 'NOVA', intentDetected: 'agendar_verb',  pendingHandoff: null,   pendingMessage: session.messageText })];\n  if (verbCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_verb',  pendingHandoff: 'SAGE',  pendingMessage: session.messageText })];\n  if (verbComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_verb', pendingHandoff: 'ATLAS', pendingMessage: session.messageText })];\n}\n// DOS o más verbos (ej: \"cotizar y agendar\") → ambiguo real → dejar que Claude NLU decida abajo.\n\n// ── CAPA 2: sin verbo de acción claro → keywords de TEMA (implican intención) ──\n// \"me duele la muela\" no tiene verbo pero el tema dental implica cotizar.\nconst KW_TEMA_COTIZAR = [\n  'implante','corona dental','carilla','veneer','ortodoncia','bracket','invisalign','alineador','blanqueamiento','endodoncia','conducto','extraccion','extracción','puente dental','limpieza dental','periodoncia','protesis','prótesis',\n  'rinoplastia','liposuccion','liposucción','abdominoplastia','mamario','aumento de busto','reduccion mamaria','reducción mamaria','bichectomia','bichectomía','blefaroplastia','bbl','lifting facial','otoplastia',\n  'dental','dentista','diente','muela','carie','caries','dolor de muela','dolor dental','me duele','empaste','relleno','funda','corona','sarro','encia','encías','sangrado','nariz','arrugas','flacidez','papada','rejuven','mejillas',\n  'precio','cuánto','cuanto','costo','tarifa',\n  'implant','dental crown','braces','aligner','whitening','root canal','bridge','denture','deep cleaning','wisdom','molar','premolar','incisor','canine',\n  'rhinoplasty','liposuction','tummy tuck','breast implant','breast augmentation','breast reduction','blepharoplasty','facelift','face lift','ear surgery',\n  'how much','price','rate','fee','tooth','teeth',\n  'implante dental','coroa','faceta','ortodontia','aparelho dentário','clareamento','canal','extração','ponte dentária','prótese dentária','limpeza dental',\n  'lipoaspiração','mamoplastia','aumento de seios','redução mamária','preço','quanto custa','quanto é','valor do','dente','molar','tratamento dental'\n];\nconst KW_TEMA_COMPARAR = [\n  'destino','viajar','viaje','vuelo','turismo médico','turismo medico','costo total','costo del viaje','cuánto me sale','hospedaje',\n  'destination','travel','trip','flight','medical tourism','medical travel','total cost','accommodation','lodging','where to go','best destination','cheapest',\n  'viagem','voo','hospedagem','alojamento','custo total','melhor destino','mais barato'\n];\n\n// Nota de diseño: 'cirugía/cirugia/procedimiento/procedure/surgery/cirurgia' se EXCLUYEN a propósito\n// de KW_TEMA_COTIZAR — son demasiado genéricos y aparecen junto a verbos de agendar. Sin verbo,\n// caen al NLU de Claude, que desambigua mejor que un substring.\n\nconst temaCotizar  = kwHit(KW_TEMA_COTIZAR);\nconst temaComparar = kwHit(KW_TEMA_COMPARAR);\n\nif (verbCount === 0) {\n  if (temaCotizar)  return [out({ targetAgent: 'NOVA', intentDetected: 'cotizar_tema',  pendingHandoff: 'SAGE',  pendingMessage: session.messageText })];\n  if (temaComparar) return [out({ targetAgent: 'NOVA', intentDetected: 'comparar_tema', pendingHandoff: 'ATLAS', pendingMessage: session.messageText })];\n  if (hasSaludo)    return [out({ targetAgent: 'NOVA', intentDetected: 'saludo',        pendingHandoff: null    })];\n}\n\n// ── CAPA 3: ambiguo (0 verbos + 0 temas, o 2+ verbos) → NLU de Claude decide ──\nreturn [out({ targetAgent: 'NOVA', intentDetected: 'unclear', pendingHandoff: null })];"
       },
-      "id": "85c42c46-075d-4bbf-89f6-6d1e9ea0d748",
+      "id": "bf64de74-1cd8-4f4b-8d85-354ab878ee7a",
       "name": "🧠 Router de Intención y Agente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -704,
-        784
+        -1344,
+        560
       ]
     },
     {
@@ -398,26 +398,26 @@
         },
         "options": {}
       },
-      "id": "b40220bd-737f-4546-babd-39f5ba3e0f51",
+      "id": "91dcf7fe-3dfd-40ae-b89f-17319950dab5",
       "name": "✅ ¿Intent Claro?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -496,
-        784
+        -1136,
+        560
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// PREPARAR CLAUDE NLU v1.0 — Paso 1\n// Solo llega aquí cuando keywords no detectaron intención clara.\n// Haiku clasifica intención y detecta idioma del mensaje.\n// ============================================================\nconst session = $json;\n\nconst systemPrompt = `Eres un clasificador de intenciones para Pangi, plataforma de turismo médico latinoamericana.\n\nINTENCIONES DISPONIBLES:\n- cotizar: quiere cotizar, ver precio o info sobre procedimiento médico/dental\n- comparar: quiere comparar destinos médicos o calcular costo total del viaje\n- agendar: quiere agendar cita, consulta o ver disponibilidad de médico\n- saludo: saludo, inicio de conversación, agradecimiento, afirmación genérica\n- unclear: no es posible determinar la intención con confianza suficiente\n\nIDIOMA DEL MENSAJE: es (español), en (inglés), pt (portugués)\n\nREGLAS:\n1. Si el mensaje menciona un procedimiento médico o dental, es 'cotizar'\n2. Si el mensaje menciona destinos, viajes, costos de viaje, es 'comparar'\n3. Si el mensaje menciona agendar, cita, turno, appointment, es 'agendar'\n4. Si confidence < 0.70, usa 'unclear'\n5. Responde SOLO con JSON válido, sin markdown, sin explicación:\n\n{\"intent\":\"cotizar\",\"language\":\"es\",\"confidence\":0.92}`;\n\nreturn [{ json: {\n  _session: session,\n  claudePayload: {\n    model: \"claude-haiku-4-5-20251001\",\n    max_tokens: 60,\n    system: systemPrompt,\n    messages: [{ role: \"user\", content: session.messageText || \"\" }]\n  }\n}}];"
       },
-      "id": "d09ab09e-c122-47a3-8351-ca3eee9489c8",
+      "id": "950249c0-a608-40f9-9027-a9dddf80c237",
       "name": "📦 Preparar — Claude NLU",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -64,
-        560
+        -704,
+        336
       ]
     },
     {
@@ -447,13 +447,13 @@
           "timeout": 8000
         }
       },
-      "id": "1c8a33cb-3ddb-40d3-a90c-6886dbe12594",
+      "id": "7a6309fa-3efe-4e53-9b15-051bd761d33e",
       "name": "☁️ Claude NLU — Haiku",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        192,
-        560
+        -448,
+        336
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -472,13 +472,13 @@
       "parameters": {
         "jsCode": "// ============================================================\n// PROCESAR INTENT CLAUDE v1.0 — Paso 1\n// Merge del resultado de Claude con el contexto de sesión.\n// Fallback robusto: cualquier fallo → mantiene 'unclear',\n// NOVA mostrará el menú de opciones al usuario.\n// ============================================================\nconst httpResult = $json;\nconst prepData   = $('📦 Preparar — Claude NLU').first().json;\nconst session    = prepData._session;\n\n// Default: mantener resultado del keyword router\nlet intentDetected   = session.intentDetected;  // 'unclear'\nlet pendingHandoff   = session.pendingHandoff;  // null\nlet targetAgent      = session.targetAgent;     // 'NOVA'\nlet detectedLanguage = session.detectedLanguage;\n\n// Mapeo: intent Claude → estructura del router\nconst INTENT_MAP = {\n  cotizar:  { handoff: 'SAGE',  intent: 'cotizar_claude'  },\n  comparar: { handoff: 'ATLAS', intent: 'comparar_claude' },\n  agendar:  { handoff: null,    intent: 'agendar_claude'  },\n  saludo:   { handoff: null,    intent: 'saludo_claude'   },\n  unclear:  { handoff: null,    intent: 'unclear'         }\n};\n\nconst VALID_INTENTS = Object.keys(INTENT_MAP);\n\ntry {\n  // httpResult puede ser la respuesta de Claude o un error de continueOnFail\n  const content = httpResult?.content?.[0]?.text;\n  if (content) {\n    const clean  = content.replace(/```json\\n?|```\\n?/g, '').trim();\n    const parsed = JSON.parse(clean);\n\n    if (\n      VALID_INTENTS.includes(parsed.intent) &&\n      typeof parsed.confidence === 'number' &&\n      parsed.confidence >= 0.70\n    ) {\n      const mapping  = INTENT_MAP[parsed.intent];\n      intentDetected = mapping.intent;\n      pendingHandoff = mapping.handoff;\n      // targetAgent siempre NOVA: la lógica de handoff está en NOVA motor\n\n      // Actualizar idioma solo si Claude lo detectó con certeza\n      if (parsed.language && ['es','en','pt'].includes(parsed.language)) {\n        detectedLanguage = parsed.language;\n      }\n    }\n    // confidence < 0.70 → mantiene 'unclear' → NOVA da menú orientador\n  }\n} catch(e) {\n  // Claude falló, timeout, JSON inválido, etc.\n  // Fallback silencioso: 'unclear' → NOVA orienta al usuario\n  // No interrumpir la conversación por un fallo de API\n}\n\nreturn [{ json: {\n  ...session,\n  intentDetected,\n  pendingHandoff,\n  targetAgent,\n  detectedLanguage,\n  _nluSource: intentDetected.includes('_claude') ? 'claude' : 'keywords_fallback'\n}}];"
       },
-      "id": "6e0c779a-1220-434f-a8e1-bdac16ef36ba",
+      "id": "d8fbaae6-37bd-487e-a2f5-bbed90c8b250",
       "name": "🔧 Procesar — Intent Claude",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -80,
-        832
+        -720,
+        608
       ]
     },
     {
@@ -624,13 +624,13 @@
         },
         "options": {}
       },
-      "id": "71a98de7-cbd4-46d1-b27f-743297b84c25",
+      "id": "513e9775-8919-49fd-bfdf-b8f816c78d5b",
       "name": "🔀 Switch — Agente Activo",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        176,
-        992
+        -464,
+        768
       ]
     },
     {
@@ -655,10 +655,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        528,
-        560
+        -112,
+        336
       ],
-      "id": "d57bcf8b-50e7-4f20-bf0a-22590e84eee3",
+      "id": "f7e26ce1-c944-4024-bf66-6c68d44df3bd",
       "name": "Call '01_nova'"
     },
     {
@@ -683,10 +683,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        528,
-        752
+        -112,
+        528
       ],
-      "id": "6ac74075-b456-4779-a336-62bec70ea947",
+      "id": "6e47a86f-aaf0-4ed8-8079-9661719ab19d",
       "name": "Call '02_sage'"
     },
     {
@@ -711,10 +711,10 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        528,
-        960
+        -112,
+        736
       ],
-      "id": "ddb1edd6-12ca-4788-b8f6-f59df40082b6",
+      "id": "fb701bfa-a9f1-466c-a440-f9c6169f0cdc",
       "name": "Call '03_atlas'"
     },
     {
@@ -724,10 +724,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        528,
-        1168
+        -112,
+        944
       ],
-      "id": "8d257b0b-2cd7-4fea-91a2-fcb12f3803ed",
+      "id": "822201c2-d769-4677-ae57-2bdca470dbc8",
       "name": "📋 Aviso de Privacidad + Bienvenida"
     },
     {
@@ -737,36 +737,36 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        528,
-        1376
+        -112,
+        1152
       ],
-      "id": "333b8870-c94c-4438-8a92-359824efc86f",
+      "id": "0d6a7932-d0ea-4064-bbec-f359d173f5b5",
       "name": "📋 Rechazo de Consentimiento"
     },
     {
       "parameters": {
-        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\nconst fn   = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm   = fn ? ` ${fn}` : '';\n\nconst WELCOME = {\n  es: `✅ *Gracias por aceptar${nm}.*\\n\\n👋 Soy *NOVA*, tu asistente de salud en Pangi.\\n\\n¿En qué puedo ayudarte hoy?\\n\\n💰 Escribe *cotizar* — Recibe precios precisos de médicos\\n🗺️ Escribe *comparar* — Analiza el costo total de tu viaje médico\\n🗓️ Escribe *agendar* — Busca médicos y reserva citas`,\n  en: `✅ *Thank you for accepting${nm}.*\\n\\n👋 I'm *NOVA*, your Pangi health assistant.\\n\\nHow can I help you today?\\n\\n💰 Type *quote* — Get precise pricing from doctors\\n🗺️ Type *compare* — Analyze your full medical trip cost\\n🗓️ Type *schedule* — Find doctors and book appointments`,\n  pt: `✅ *Obrigado por aceitar${nm}.*\\n\\n👋 Sou *NOVA*, sua assistente de saúde do Pangi.\\n\\nComo posso te ajudar hoje?\\n\\n💰 Escreva *cotizar* — Receba preços precisos de médicos\\n🗺️ Escreva *comparar* — Analise o custo total da sua viagem médica\\n🗓️ Escreva *agendar* — Encontre médicos e reserve consultas`\n};\n\nconst lang = LANG in WELCOME ? LANG : 'es';\n\n// Si el primer mensaje tenía una intención clara, rutear directo sin pasar por NOVA\nconst pendingText  = ctx._pending_intent || '';\nconst pendingTextN = pendingText.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');\nconst hasCotizar   = !!pendingText && /cotiz|implante|rinoplas|liposu|mamario|dental|diente|muela|ortodoncia|blanquea|endodoncia|carilla|veneer|corona|puente|protesis|extrac|procedimiento|cirugia|cirugía|quote|price|surgery|tooth|teeth|cotação|preço|cirurgia/.test(pendingTextN);\nconst hasComparar  = !!pendingText && !hasCotizar && /compar|destino|turismo|costo.total|compare|destination|comparar/.test(pendingTextN);\nconst hasAgendar   = !!pendingText && !hasCotizar && !hasComparar && /agendar|cita|reservar|appointment|schedule|consulta/.test(pendingTextN);\n\nconst detectedPending = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : hasAgendar ? 'NOVA_AGENDAR' : null;\nif (detectedPending) {\n  const targetAgent = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : 'NOVA';\n  const pendingHandoff = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : null;\n  const welcomePrefix = lang === 'en'\n    ? `✅ *Thank you for accepting${nm}.*\\n\\n`\n    : lang === 'pt'\n    ? `✅ *Obrigado por aceitar${nm}.*\\n\\n`\n    : `✅ *Gracias por aceptar${nm}.*\\n\\n`;\n\n  return [{ json: {\n    responseText:      welcomePrefix + WELCOME[lang],\n    newActiveAgent:    'NOVA',\n    newSessionState:   'initial_presented',\n    newSessionContext: {\n      ...ctx,\n      consent_given:    true,\n      awaiting_consent: false,\n      language:         lang,\n      nova:             { state: 'initial_presented' },\n      pendingHandoff:   detectedPending,\n      pendingMessage:   pendingText,\n      _pending_intent:  null\n    },\n    intentDetected:    hasCotizar ? 'cotizar_keyword' : hasComparar ? 'comparar_keyword' : 'agendar_keyword',\n    userId:    inp.userId,\n    sessionId: inp.sessionId,\n    userName:  inp.userName || null,\n    remoteJid: inp.remoteJid,\n    instance:  inp.instance\n  }}];\n}\n\nreturn [{ json: {\n  responseText:      WELCOME[lang],\n  newActiveAgent:    'NOVA',\n  newSessionState:   'initial_presented',\n  newSessionContext: {\n    ...ctx,\n    consent_given:    true,\n    awaiting_consent: false,\n    language:         lang,\n    nova: { state: 'initial_presented' }\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
+        "jsCode": "const inp  = $input.first().json;\nconst LANG = inp.detectedLanguage || 'es';\nconst ctx  = inp.sessionContext || {};\nconst fn   = inp.userName ? inp.userName.split(' ')[0] : null;\nconst nm   = fn ? ` ${fn}` : '';\n\nconst WELCOME = {\n  es: `✅ *Gracias por aceptar${nm}.*\\n\\n👋 Soy *NOVA*, tu asistente de salud en Pangi.\\n\\n¿En qué puedo ayudarte hoy?\\n\\n💰 Escribe *cotizar* — Recibe precios precisos de médicos\\n🗺️ Escribe *comparar* — Analiza el costo total de tu viaje médico\\n🗓️ Escribe *agendar* — Busca médicos y reserva citas`,\n  en: `✅ *Thank you for accepting${nm}.*\\n\\n👋 I'm *NOVA*, your Pangi health assistant.\\n\\nHow can I help you today?\\n\\n💰 Type *quote* — Get precise pricing from doctors\\n🗺️ Type *compare* — Analyze your full medical trip cost\\n🗓️ Type *schedule* — Find doctors and book appointments`,\n  pt: `✅ *Obrigado por aceitar${nm}.*\\n\\n👋 Sou *NOVA*, sua assistente de saúde do Pangi.\\n\\nComo posso te ajudar hoje?\\n\\n💰 Escreva *cotizar* — Receba preços precisos de médicos\\n🗺️ Escreva *comparar* — Analise o custo total da sua viagem médica\\n🗓️ Escreva *agendar* — Encontre médicos e reserve consultas`\n};\n\nconst lang = LANG in WELCOME ? LANG : 'es';\n\n// Si el primer mensaje tenía una intención clara, rutear directo sin pasar por NOVA\nconst pendingText  = ctx._pending_intent || '';\nconst pendingTextN = pendingText.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');\nconst hasCotizar   = !!pendingText && /cotiz|implante|rinoplas|liposu|mamario|dental|diente|muela|ortodoncia|blanquea|endodoncia|carilla|veneer|corona|puente|protesis|extrac|procedimiento|cirugia|cirugía|quote|price|surgery|tooth|teeth|cotação|preço|cirurgia/.test(pendingTextN);\nconst hasComparar  = !!pendingText && !hasCotizar && /compar|destino|turismo|costo.total|compare|destination|comparar/.test(pendingTextN);\nconst hasAgendar   = !!pendingText && !hasCotizar && !hasComparar && /agendar|cita|reservar|appointment|schedule|consulta/.test(pendingTextN);\n\nconst detectedPending = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : hasAgendar ? 'NOVA_AGENDAR' : null;\nif (detectedPending) {\n  const targetAgent = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : 'NOVA';\n  const pendingHandoff = hasCotizar ? 'SAGE' : hasComparar ? 'ATLAS' : null;\n  const welcomePrefix = lang === 'en'\n    ? `✅ *Thank you for accepting${nm}.*\\n\\n`\n    : lang === 'pt'\n    ? `✅ *Obrigado por aceitar${nm}.*\\n\\n`\n    : `✅ *Gracias por aceptar${nm}.*\\n\\n`;\n\n  // El usuario ya dijo lo que necesitaba ANTES del consentimiento: reconocerlo\n  // explícitamente en vez de mostrar el menú genérico (antes parecía que su\n  // información se había perdido y la re-escribía).\n  const resumeMsg = lang === 'en'\n    ? `${welcomePrefix}I kept what you told me:\\n_\"${pendingText}\"_\\n\\nWe continue right from there — type *ok* and we'll pick it up 👇`\n    : lang === 'pt'\n    ? `${welcomePrefix}Guardei o que você me disse:\\n_\"${pendingText}\"_\\n\\nContinuamos exatamente daí — escreva *ok* e seguimos 👇`\n    : `${welcomePrefix}Guardé lo que me contaste:\\n_\"${pendingText}\"_\\n\\nSeguimos justo desde ahí — escribe *ok* y continuamos 👇`;\n\n  return [{ json: {\n    responseText:      resumeMsg,\n    newActiveAgent:    'NOVA',\n    newSessionState:   'initial_presented',\n    newSessionContext: {\n      ...ctx,\n      consent_given:    true,\n      awaiting_consent: false,\n      language:         lang,\n      nova:             { state: 'initial_presented' },\n      pendingHandoff:   detectedPending,\n      pendingMessage:   pendingText,\n      _pending_intent:  null\n    },\n    intentDetected:    hasCotizar ? 'cotizar_keyword' : hasComparar ? 'comparar_keyword' : 'agendar_keyword',\n    userId:    inp.userId,\n    sessionId: inp.sessionId,\n    userName:  inp.userName || null,\n    remoteJid: inp.remoteJid,\n    instance:  inp.instance\n  }}];\n}\n\nreturn [{ json: {\n  responseText:      WELCOME[lang],\n  newActiveAgent:    'NOVA',\n  newSessionState:   'initial_presented',\n  newSessionContext: {\n    ...ctx,\n    consent_given:    true,\n    awaiting_consent: false,\n    language:         lang,\n    nova: { state: 'initial_presented' }\n  },\n  userId:    inp.userId,\n  sessionId: inp.sessionId,\n  userName:  inp.userName || null,\n  remoteJid: inp.remoteJid,\n  instance:  inp.instance\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        528,
-        1552
+        -112,
+        1328
       ],
-      "id": "3f51325a-1c50-4af9-8c49-c5e482a1fda2",
+      "id": "84ce75c0-8772-4365-ad1c-8fea716e39e7",
       "name": "📋 Bienvenida Post-Consentimiento"
     },
     {
       "parameters": {
         "jsCode": "// Recuperar contexto del nodo de preparación (anterior al HTTP)\nconst prep = $('📤 Preparar Envío Telegram').first().json;\n\nreturn [{ json: {\n  operation: 'updateSession',\n  params: {\n    sessionId: prep._sessionId,\n    agent:     prep._newActiveAgent,\n    state:     prep._newSessionState,\n    context:   prep._newSessionContext\n  },\n  // Transportar para guardar mensaje saliente\n  _prep: prep\n}}];"
       },
-      "id": "eca26d47-62bc-4101-8c7a-7db0bde49b28",
+      "id": "70ccda75-702b-487d-a98d-b71c12472f30",
       "name": "📦 Payload — Update Session",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2112,
-        672
+        1488,
+        448
       ]
     },
     {
@@ -774,26 +774,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "3a999bc8-6d53-43b1-84db-b7df4ebc6924",
+      "id": "7e083e00-d86c-43ea-a0e9-28cf5f415976",
       "name": "🗄️ DB — Update Session",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1328,
-        912
+        704,
+        688
       ]
     },
     {
       "parameters": {
         "jsCode": "const prep = $('📦 Payload — Update Session').first().json._prep;\n\nreturn [{ json: {\n  operation: 'saveMessage',\n  params: {\n    userId:      prep._userId,\n    sessionId:   prep._sessionId,\n    agent:       prep._newActiveAgent,\n    role:        'assistant',\n    message:     prep._responseText,\n    messageType: 'text'\n  }\n}}];"
       },
-      "id": "3e85fdbb-2ab2-4c80-84ad-957dbb91916c",
+      "id": "7de55363-d745-4ab5-a76d-2558ed9dcf74",
       "name": "📦 Payload — Guardar Mensaje Saliente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1568,
-        912
+        944,
+        688
       ]
     },
     {
@@ -801,26 +801,26 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "dc782694-b8b5-4fae-ad15-171a4cfc4260",
+      "id": "e1c1c117-b6b2-477c-af4b-e4fdec43567d",
       "name": "🗄️ DB — Guardar Mensaje Saliente",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1808,
-        912
+        1184,
+        688
       ]
     },
     {
       "parameters": {
         "jsCode": "// v2.0 — Canal-agnóstico: phone viene del sobre canónico ('tg:<chat_id>' en Telegram).\n// El idioma default aprovecha language_code de Telegram si es es/en/pt.\nconst msg = $('🔎 Extraer y Validar Mensaje').first().json;\nreturn [{ json: {\n  operation: 'getOrCreateUser',\n  params: {\n    phone:    msg.phone,\n    name:     msg.pushName || null,\n    language: msg.tgLanguage || 'es'\n  }\n}}];"
       },
-      "id": "9ecde9d3-12c4-4f93-8c05-afb652671986",
+      "id": "68c66da8-f319-4b20-b600-73541a7b3b1d",
       "name": "📦 Payload — getOrCreateUser",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        0,
-        0
+        -640,
+        -224
       ]
     },
     {
@@ -830,10 +830,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -752,
-        160
+        -1392,
+        -64
       ],
-      "id": "0c0567cd-49a8-420f-96fe-4101472b365c",
+      "id": "78e14aa1-410d-4b77-aca6-ca0e2051b69a",
       "name": "📦 Payload — checkDedup"
     },
     {
@@ -841,13 +841,13 @@
         "workflowId": "ancJzcIbrd9T9QJB",
         "options": {}
       },
-      "id": "50cf788b-8dc8-48de-8803-91343d3bf69c",
+      "id": "54780ca0-c2d1-4da5-819a-1d4012230126",
       "name": "🗄️ DB — Dedup",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        -544,
-        160
+        -1184,
+        -64
       ]
     },
     {
@@ -878,10 +878,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -336,
-        160
+        -976,
+        -64
       ],
-      "id": "a3727793-1cca-42fa-b6d9-85623048c0f9",
+      "id": "c2f9bd31-c998-46b8-a02d-beb41bdfce2f",
       "name": "✅ ¿Mensaje Único?"
     }
   ],
@@ -1380,7 +1380,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "cac92045-8c2d-4beb-b8c6-240a4331dbb7",
+  "versionId": "5a39a52d-9397-4a0a-b525-bebd1de68123",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "b4dbb42833ecc66de64f86354839203493e3d1e41bb82f2097b453a128cb5b4c"
