@@ -48,6 +48,7 @@ psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/001_initial_schema
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/002_kb_paired_format.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/003_dedup_and_session_index.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/004_pangi_integration.sql
+psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/005_plastic_surgery_mapping.sql
 ```
 
 `001` crea el schema y siembra la knowledge base (22 procedimientos:
