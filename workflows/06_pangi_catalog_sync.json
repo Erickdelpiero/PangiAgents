@@ -1,0 +1,367 @@
+{
+  "name": "06_pangi_catalog_sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -220,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "⏰ Cada Hora"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        180
+      ],
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "▶️ Ejecución Manual"
+    },
+    {
+      "parameters": {
+        "url": "https://pangi.com/api/common/speciality?lang=en",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        0,
+        80
+      ],
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "🌐 API — Especialidades",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://pangi.com/api/common/countries",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        200,
+        80
+      ],
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "🌐 API — Países",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "https://pangi.com/api/common/available-locations",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        400,
+        80
+      ],
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "🌐 API — Ubicaciones Activas",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ============================================================\n// 06_pangi_catalog_sync — Construcción de SQL\n// ------------------------------------------------------------\n// Toma las respuestas de los 3 endpoints públicos de Pangi y\n// arma las sentencias de upsert. No escribe nada: solo construye.\n//\n// FUENTES (una llamada a speciality trae los 3 idiomas):\n//   /api/common/speciality?lang=en   → especialidades + procedimientos\n//   /api/common/countries            → catálogo curado de ciudades\n//   /api/common/available-locations  → ciudades con médicos reales\n// ============================================================\n\nconst runAt = new Date().toISOString();\nconst source = ($execution && $execution.mode === 'test') ? 'manual' : 'schedule';\n\n// ── Sanitizadores ──\nconst q = (v) => (v === null || v === undefined || v === '')\n  ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qi = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : 'NULL'; };\nconst qb = (v) => (v === true || v === 'true') ? 'TRUE' : 'FALSE';\n\n// sub_speciality, states y cities llegan como STRING con JSON adentro.\n// Proctology llega como array real. Hay que soportar ambos.\nconst parseArr = (v) => {\n  if (Array.isArray(v)) return v;\n  if (typeof v === 'string' && v.trim()) {\n    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }\n  }\n  return [];\n};\n\nconst fail = (msg) => [{ json: { valid: false, runAt, source, error: msg,\n  sqlLogFail: \"INSERT INTO pangi_catalog_sync_log \" +\n    \"(started_at, finished_at, status, trigger_source, error_message) VALUES (\" +\n    q(runAt) + \"::timestamptz, NOW(), 'failed', \" + q(source) + \", \" + q(msg) + \");\" } }];\n\n// ── 1. Leer las tres respuestas ──\nlet rSpec, rCountries, rLocations;\ntry {\n  rSpec      = $('🌐 API — Especialidades').first().json;\n  rCountries = $('🌐 API — Países').first().json;\n  rLocations = $('🌐 API — Ubicaciones Activas').first().json;\n} catch (e) {\n  return fail('No se pudieron leer las respuestas del API: ' + e.message);\n}\n\nconst specData = (rSpec && Array.isArray(rSpec.data)) ? rSpec.data : [];\nconst cntData  = (rCountries && Array.isArray(rCountries.data)) ? rCountries.data : [];\nconst locData  = (rLocations && Array.isArray(rLocations.data)) ? rLocations.data : [];\n\n// Guarda de plausibilidad: Pangi tiene 22 especialidades. Si llegan\n// muchas menos, algo salió mal y NO se debe tocar el catálogo local.\nconst MIN_SPECIALTIES = 15;\nif (specData.length < MIN_SPECIALTIES) {\n  return fail('Respuesta implausible: ' + specData.length +\n              ' especialidades (mínimo esperado ' + MIN_SPECIALTIES + ')');\n}\nif (cntData.length === 0 && locData.length === 0) {\n  return fail('Ambas fuentes de ciudades vinieron vacías');\n}\n\n// ── 2. Especialidades ──\nconst specRows = [];\nconst procRows = [];\nconst seenProc = new Set();\n\nfor (const s of specData) {\n  if (!s || !s._id || !s.name) continue;\n\n  specRows.push('(' + [\n    q(s._id), q(s.name), q(s.name_es), q(s.name_pt),\n    qb(s.is_visible), qi(s.allow_number_of_procedure) === 'NULL' ? '1' : qi(s.allow_number_of_procedure),\n    q(s.doc_en), q(s.doc_es), q(s.doc_pt), q(s.logo), q(runAt) + '::timestamptz'\n  ].join(', ') + ')');\n\n  // Procedimientos: arreglos PARALELOS alineados por posición.\n  // Dental tiene 48 en inglés y 0 traducidos → name_es/name_pt en NULL.\n  const en = parseArr(s.sub_speciality);\n  const es = parseArr(s.sub_speciality_es);\n  const pt = parseArr(s.sub_speciality_pt);\n\n  for (let i = 0; i < en.length; i++) {\n    const name = en[i];\n    if (typeof name !== 'string' || !name) continue;\n    // Dedup: ON CONFLICT no puede afectar la misma fila dos veces\n    // dentro de un mismo INSERT.\n    const key = s._id + '||' + name;\n    if (seenProc.has(key)) continue;\n    seenProc.add(key);\n\n    procRows.push('(' + [\n      q(s._id), String(i), q(name),\n      q(es[i] !== undefined ? es[i] : null),\n      q(pt[i] !== undefined ? pt[i] : null),\n      q(runAt) + '::timestamptz'\n    ].join(', ') + ')');\n  }\n}\n\nif (specRows.length === 0) return fail('Ninguna especialidad válida tras el parseo');\nif (procRows.length === 0) return fail('Ningún procedimiento válido tras el parseo');\n\n// ── 3. Ciudades: unión de las dos fuentes ──\n// countries           → in_catalog  (catálogo curado)\n// available-locations → has_doctors (dónde hay médicos de verdad)\nconst cityMap = new Map();\nconst putCity = (code, cname, city, flag) => {\n  if (!code || !city) return;\n  const key = code + '||' + city;\n  const prev = cityMap.get(key) || { code, cname, city, in_catalog: false, has_doctors: false };\n  prev[flag] = true;\n  if (cname) prev.cname = cname;\n  cityMap.set(key, prev);\n};\n\nfor (const c of cntData) {\n  if (!c || !c.code) continue;\n  for (const city of parseArr(c.cities)) {\n    if (typeof city === 'string' && city) putCity(c.code, c.name, city, 'in_catalog');\n  }\n}\nfor (const l of locData) {\n  const code = l && l.country ? l.country.code : null;\n  const cname = l && l.country ? l.country.name : null;\n  for (const city of (Array.isArray(l.cities) ? l.cities : [])) {\n    if (typeof city === 'string' && city) putCity(code, cname, city, 'has_doctors');\n  }\n}\n\nconst cityRows = [];\nfor (const c of cityMap.values()) {\n  cityRows.push('(' + [\n    q(c.code), q(c.cname || c.code), q(c.city),\n    qb(c.in_catalog), qb(c.has_doctors), q(runAt) + '::timestamptz'\n  ].join(', ') + ')');\n}\nif (cityRows.length === 0) return fail('Ninguna ciudad válida tras el parseo');\n\n// ── 4. Sentencias ──\nconst sqlSpecialties =\n  'INSERT INTO pangi_specialties ' +\n  '(pangi_id, name, name_es, name_pt, is_visible, allow_number_of_procedure, ' +\n  ' doc_en, doc_es, doc_pt, logo, synced_at) VALUES\\n' +\n  specRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (pangi_id) DO UPDATE SET ' +\n  'name = EXCLUDED.name, name_es = EXCLUDED.name_es, name_pt = EXCLUDED.name_pt, ' +\n  'is_visible = EXCLUDED.is_visible, ' +\n  'allow_number_of_procedure = EXCLUDED.allow_number_of_procedure, ' +\n  'doc_en = EXCLUDED.doc_en, doc_es = EXCLUDED.doc_es, doc_pt = EXCLUDED.doc_pt, ' +\n  'logo = EXCLUDED.logo, synced_at = EXCLUDED.synced_at;';\n\nconst sqlProcedures =\n  'INSERT INTO pangi_procedures ' +\n  '(specialty_pangi_id, position, name, name_es, name_pt, synced_at) VALUES\\n' +\n  procRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (specialty_pangi_id, name) DO UPDATE SET ' +\n  'position = EXCLUDED.position, name_es = EXCLUDED.name_es, ' +\n  'name_pt = EXCLUDED.name_pt, synced_at = EXCLUDED.synced_at;';\n\nconst sqlCities =\n  'INSERT INTO pangi_cities ' +\n  '(country_code, country_name, city, in_catalog, has_doctors, synced_at) VALUES\\n' +\n  cityRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (country_code, city) DO UPDATE SET ' +\n  'country_name = EXCLUDED.country_name, in_catalog = EXCLUDED.in_catalog, ' +\n  'has_doctors = EXCLUDED.has_doctors, synced_at = EXCLUDED.synced_at;';\n\n// Limpieza + bitácora en UNA sola sentencia (CTE), para no depender\n// de que el nodo Postgres acepte múltiples sentencias.\n// Las especialidades NO se borran aquí: is_visible ya las oculta y\n// borrarlas cascadearía procedimientos dentro del mismo statement.\nconst sqlCleanupAndLog =\n  'WITH del_proc AS (' +\n  '  DELETE FROM pangi_procedures WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1' +\n  '), del_city AS (' +\n  '  DELETE FROM pangi_cities WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1' +\n  ') INSERT INTO pangi_catalog_sync_log ' +\n  '(started_at, finished_at, status, specialties_seen, procedures_seen, ' +\n  ' cities_seen, rows_deleted, trigger_source) ' +\n  'SELECT ' + q(runAt) + '::timestamptz, NOW(), \\'ok\\', ' +\n  specRows.length + ', ' + procRows.length + ', ' + cityRows.length + ', ' +\n  '(SELECT COUNT(*) FROM del_proc) + (SELECT COUNT(*) FROM del_city), ' +\n  q(source) + ';';\n\nreturn [{ json: {\n  valid: true, runAt, source,\n  counts: { specialties: specRows.length, procedures: procRows.length, cities: cityRows.length },\n  sqlSpecialties, sqlProcedures, sqlCities, sqlCleanupAndLog\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        80
+      ],
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "🔧 Construir SQL"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "sync-cond-01",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        800,
+        80
+      ],
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "✅ ¿Datos Válidos?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlSpecialties }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1020,
+        -20
+      ],
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "🗄️ Upsert Especialidades",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlProcedures }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1220,
+        -20
+      ],
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "🗄️ Upsert Procedimientos",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlCities }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1420,
+        -20
+      ],
+      "id": "a1000000-0000-4000-8000-00000000000a",
+      "name": "🗄️ Upsert Ciudades",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlCleanupAndLog }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1620,
+        -20
+      ],
+      "id": "a1000000-0000-4000-8000-00000000000b",
+      "name": "🧹 Limpiar y Registrar",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlLogFail }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1020,
+        200
+      ],
+      "id": "a1000000-0000-4000-8000-00000000000c",
+      "name": "⚠️ Registrar Fallo",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "⏰ Cada Hora": {
+      "main": [
+        [
+          {
+            "node": "🌐 API — Especialidades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "▶️ Ejecución Manual": {
+      "main": [
+        [
+          {
+            "node": "🌐 API — Especialidades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌐 API — Especialidades": {
+      "main": [
+        [
+          {
+            "node": "🌐 API — Países",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌐 API — Países": {
+      "main": [
+        [
+          {
+            "node": "🌐 API — Ubicaciones Activas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌐 API — Ubicaciones Activas": {
+      "main": [
+        [
+          {
+            "node": "🔧 Construir SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Construir SQL": {
+      "main": [
+        [
+          {
+            "node": "✅ ¿Datos Válidos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ Upsert Especialidades": {
+      "main": [
+        [
+          {
+            "node": "🗄️ Upsert Procedimientos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ Upsert Procedimientos": {
+      "main": [
+        [
+          {
+            "node": "🗄️ Upsert Ciudades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ Upsert Ciudades": {
+      "main": [
+        [
+          {
+            "node": "🧹 Limpiar y Registrar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ¿Datos Válidos?": {
+      "main": [
+        [
+          {
+            "node": "🗄️ Upsert Especialidades",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⚠️ Registrar Fallo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
