@@ -49,13 +49,14 @@ psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/002_kb_paired_form
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/003_dedup_and_session_index.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/004_pangi_integration.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/005_plastic_surgery_mapping.sql
+psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/006_pangi_catalog_tables.sql
 ```
 
-`001` crea el schema y siembra la knowledge base (22 procedimientos:
-12 dental + 10 cirugía plástica) y 10 destinos de ATLAS.
+`001` crea el schema y siembra la knowledge base (22 procedimientos:12 dental + 10 cirugía plástica) y 10 destinos de ATLAS.
 `002` migra `critical_questions` al formato `{key, question}`.
 `003` documenta objetos creados en caliente durante el MVP.
 `004` mapea la taxonomía de la KB contra el catálogo real de Pangi y agrega las columnas de identidad para el widget.
+`006` crea el espejo local del catálogo de Pangi que alimenta el workflow 06_pangi_catalog_sync.
 
 ## Workflows
 
