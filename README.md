@@ -90,6 +90,7 @@ psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/005_plastic_surger
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/006_pangi_catalog_tables.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/007_fix_catalog_view.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/008_kb_i18n_names.sql
+psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/009_kb_display_order.sql
 ```
 
 `001` crea el schema y siembra la knowledge base (22 procedimientos:
@@ -106,6 +107,10 @@ procedimientos estéticos en el Admin. Los 22 procedimientos resuelven.
 distingue más fino que Pangi (brackets vs. alineadores, corona vs. puente).
 `008` traslada a la KB los nombres visibles en los tres idiomas, que hasta
 entonces vivían solo dentro del literal `PROCEDURES` del motor de SAGE.
+`009` traslada a la KB el orden de presentación de los procedimientos. El
+motor numera la lista por índice y acepta ese número como respuesta, así
+que el orden del array es lo que el paciente ve como "1.", "2.", "3." —
+y el del literal es curado, no alfabético.
 
 > **Los strings de Pangi se copian literalmente, nunca se escriben a
 > mano.** Varios llevan guion largo (`–`, U+2013) y uno lleva espacio
