@@ -130,6 +130,10 @@ que quienes los invocan):
 `06_pangi_catalog_sync.json` es independiente: no lo invoca nadie y no
 invoca a nadie. Se puede importar en cualquier momento.
 
+NOVA consulta el catálogo antes del motor, vía `05_db_manager`
+(`getCities`). Si esa llamada falla, el motor cae a su lista literal y
+la conversación continúa — degradación elegante, no error.
+
 Tras importar hay que reconectar credenciales manualmente — los exports
 de n8n no las incluyen.
 
