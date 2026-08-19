@@ -21,13 +21,51 @@ pérdida de contexto.
 - **Orquestación:** n8n v1.121.3 (self-hosted, npm)
 - **LLM:** Claude Haiku (NLU) + Sonnet (NLG) vía proxy LiteLLM
 - **Estado:** PostgreSQL 16 (`pangi_dev`)
-- **Observabilidad:** Langfuse (self-hosted)
+- **Observabilidad:** Langfuse Cloud, plan gratuito — **temporal**
 - **Canal actual:** Telegram (interfaz de desarrollo)
+
+> **Langfuse Cloud tiene condición de salida.** Las trazas incluyen
+> contexto clínico (procedimiento, condiciones, medicamentos, edad,
+> sexo). El PHI Strip remueve identificadores directos antes de cada
+> llamada al LLM, así que bajo Safe Harbor no hay PHI — pero no se
+> habilita a pacientes reales sin autohospedar Langfuse dentro del
+> Azure de Pangi. Ver `docs/roadmap-integracion-pangi.md`, riesgo R8.
 
 > El canal es intercambiable por diseño. Los agentes son
 > channel-agnostic; el acoplamiento vive solo en los bordes del
 > orquestador (ingress y egress). El destino de producción es un widget
 > embebido en pangi.com.
+
+## Integración con Pangi
+
+El catálogo —especialidades, procedimientos y ciudades— es propiedad de
+Pangi y se administra desde `admin.pangi.com`. Este sistema **no
+mantiene listas propias**: las sincroniza.
+
+```
+admin.pangi.com  →  API pública de Pangi  →  06_pangi_catalog_sync
+                                                      ↓
+                                              PostgreSQL local
+                                                      ↓
+                                              SAGE · NOVA · ATLAS
+```
+
+Los agentes leen el catálogo **desde PostgreSQL**, nunca llaman a la API
+de Pangi durante la conversación. Dos razones: cero latencia HTTP
+mientras el paciente espera, y si Pangi cae los agentes siguen operando
+con el último catálogo conocido.
+
+La sincronización corre cada hora. Cuando el stack esté en Azure con URL
+estable, se le suma un Webhook Trigger para frescura casi instantánea y
+el schedule baja a diario como reconciliación anti-deriva.
+
+**Cinco endpoints de Pangi son públicos** (sin autenticación):
+`speciality`, `countries`, `available-locations`, `doctors`, `date-slots`.
+Eso permite construir catálogos y todo el flujo de NOVA hasta el momento
+de reservar sin credencial de servicio.
+
+Contratos verificados, riesgos abiertos y fases en
+`docs/roadmap-integracion-pangi.md`.
 
 ## Estructura
 
@@ -50,6 +88,8 @@ psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/003_dedup_and_sess
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/004_pangi_integration.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/005_plastic_surgery_mapping.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/006_pangi_catalog_tables.sql
+psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/007_fix_catalog_view.sql
+psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/008_kb_i18n_names.sql
 ```
 
 `001` crea el schema y siembra la knowledge base (22 procedimientos:
@@ -62,6 +102,15 @@ y agrega las columnas de identidad para el widget.
 procedimientos estéticos en el Admin. Los 22 procedimientos resuelven.
 `006` crea el espejo local del catálogo de Pangi que alimenta el workflow
 `06_pangi_catalog_sync`.
+`007` corrige `v_pangi_catalog`: el LEFT JOIN duplicaba filas donde la KB
+distingue más fino que Pangi (brackets vs. alineadores, corona vs. puente).
+`008` traslada a la KB los nombres visibles en los tres idiomas, que hasta
+entonces vivían solo dentro del literal `PROCEDURES` del motor de SAGE.
+
+> **Los strings de Pangi se copian literalmente, nunca se escriben a
+> mano.** Varios llevan guion largo (`–`, U+2013) y uno lleva espacio
+> final (`Teeth Cleaning (Prophylaxis) `). Pangi identifica los
+> tratamientos por string exacto, no por ObjectId.
 
 ## Workflows
 
@@ -73,16 +122,29 @@ que quienes los invocan):
 3. `01_nova.json`, `02_sage.json`, `03_atlas.json`
 4. `00_orchestrator_telegram.json`
 
+`06_pangi_catalog_sync.json` es independiente: no lo invoca nadie y no
+invoca a nadie. Se puede importar en cualquier momento.
+
 Tras importar hay que reconectar credenciales manualmente — los exports
 de n8n no las incluyen.
 
+> **Al modificar un workflow en n8n, exportarlo y commitearlo.** Ya
+> ocurrió una divergencia en la que n8n corría la versión parcheada y
+> el repositorio guardaba la anterior. La fuente de verdad de lo que
+> está corriendo es n8n; la del proyecto es este repositorio, y deben
+> coincidir.
+
 `workflows/_legacy/` contiene el orquestador original de WhatsApp vía
 Evolution API, previo a la migración a Telegram. Se conserva como
-referencia histórica; **no está en uso**.
+referencia histórica; **no está en uso**. Evolution API quedó descartada:
+las notificaciones de producción irán por la Cloud API oficial de Meta.
 
 ## Estado
 
-MVP v2 funcional y demostrado. Próxima fase: integración con la
-plataforma Pangi (Angular + NestJS + MongoDB sobre Azure) — widget
-embebido, catálogos dinámicos desde el admin, y creación real de
-solicitudes de tratamiento vía API.
+MVP v2 funcional y demostrado. Integración con Pangi en curso: catálogo
+sincronizado y mapeo completo (22/22 procedimientos, 36 ciudades).
+Pendiente: cablear los agentes al catálogo, escritura de solicitudes vía
+API, widget embebido y migración a Azure.
+
+Tags de referencia: `mvp-v2-pre-pangi` (base estable previa a la
+integración), `f1-catalog-sync` (sincronización de catálogo operativa).
