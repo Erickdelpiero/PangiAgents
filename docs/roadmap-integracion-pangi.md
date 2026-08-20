@@ -84,42 +84,64 @@ La credencial solo bloquea tres cosas: reservar la cita, leer el perfil del paci
 
 # PISTA A — Erick (independiente)
 
-## F1 · Catálogos reales
-**17–22 ago · Sin dependencias**
+## F1 · Catálogos reales — ✅ CERRADA
+**17–20 ago · Sin dependencias**
 
 | # | Tarea | Estado |
 |---|---|---|
-| F1.1 | **Workflow `06_pangi_catalog_sync`** — schedule horario, consulta los 3 endpoints públicos, upsert a `pangi_specialties` / `pangi_procedures` / `pangi_cities`. Parsear `sub_speciality` (string con JSON adentro). | 🔴 **Siguiente** |
+| F1.1 | Workflow `06_pangi_catalog_sync` | ✅ Schedule horario · 21 especialidades / 163 procedimientos / 36 ciudades |
 | F1.2 | Tabla de mapeo `procedure_key` ↔ string de Pangi | ✅ Migraciones 004 + 005 · 22/22 |
-| F1.3 | Mapeo de ciudades | ✅ 3/10 con médicos activos. `Bogota` sin tilde. |
+| F1.3 | Mapeo de ciudades | ✅ 36 sincronizadas con banderas `in_catalog` / `has_doctors` |
 | F1.4 | Informe de brechas para el CEO de Pangi | ✅ Enviado 18 ago · aprobó cargar los estéticos |
 
-**Entregable:** ambos agentes leyendo catálogo real de Pangi. Fin de las listas hardcodeadas.
+**Entregable cumplido:** ambos agentes leen el catálogo real de Pangi.
+Cero listas hardcodeadas.
 
-**Nota:** los agentes leen el catálogo **desde PostgreSQL**, no llaman a la API de Pangi en el camino crítico de la conversación. Si Pangi cae, degradan con el último catálogo conocido.
+**Alcance real vs. planificado:** el descubrimiento reveló **siete**
+listas duplicadas que el roadmap no contemplaba — tres en NOVA
+(`CITY_CANON`, `KNOWN`, `KNOWN_SCHED`), cuatro en SAGE (una de ellas en
+el estado `summary`), más una quinta en el nodo de NLG que incluía
+`Miami` y `San José, CR`, destinos que no existen en Pangi. Todas
+unificadas.
 
-## F2 · Schema v2 + operaciones de catálogo
-**19–22 ago**
+**Nota:** los agentes leen el catálogo **desde PostgreSQL**, no llaman a
+la API de Pangi en el camino crítico de la conversación. Si Pangi cae,
+degradan con el último catálogo conocido.
+
+## F2 · Schema v2 + operaciones de catálogo — ✅ CERRADA
+**19–20 ago**
 
 | # | Tarea | Estado |
 |---|---|---|
-| F2.1 | Migraciones `004` + `005` | ✅ Aplicadas y commiteadas |
-| F2.2 | Estados de `medical_intake`: separar `submitted` de `published` | ✅ Documentado en 004 · falta cablear en SAGE (F4.4) |
-| F2.3 | Tablas de catálogo + operaciones `getCities` / `getProcedures` en `05_db_manager` | 🔴 Con F1.1 |
-| F2.4 | Limpieza de `message_dedup` (>1 hora) | 🔴 Pendiente |
+| F2.1 | Migraciones de integración | ✅ 004 a 009 aplicadas |
+| F2.2 | Estados de `medical_intake`: `submitted` vs `published` | ✅ Documentado en 004 · se cablea en F4.4 |
+| F2.3 | Operaciones `getCities` / `getProcedures` + cableado de agentes | ✅ 22 operaciones en el router |
+| F2.4 | Limpieza de `message_dedup` | ✅ Operación `cleanupMessageDedup` + `07_maintenance` |
 
-## F3 · NOVA contra la API real
-**24–29 ago · Depende de F2.3 · No depende de el contacto técnico backend de Pangi**
+**Hallazgo:** `cleanupExpiredSessions` existía desde el MVP pero **ningún
+workflow la llamaba**. Como `idx_one_active_session_per_user` solo
+permite una sesión no expirada por usuario, una sesión vencida sin
+marcar seguía bloqueando la creación de una nueva. `07_maintenance` le
+da un llamador.
+
+## F3 · NOVA contra la API real — 🔴 SIGUIENTE
+**Sin dependencias de el contacto técnico backend de Pangi: los cinco endpoints son públicos**
 
 | # | Tarea | Detalle |
 |---|---|---|
 | F3.1 | Reemplazar `mockQueryDoctors` | Llamada real. Filtrar ciudad en memoria desde `all_clinic_address[].city` (la API filtra por país, no por ciudad). |
-| F3.2 | Nuevo paso: selección de clínica | `date-slots` exige `clinic_address`. La cadena real es doctor → clínica → fecha → slots. |
+| F3.2 | Nuevo paso: selección de clínica | `date-slots` exige `clinic_address`. La cadena real es doctor → clínica → fecha → slots. **Agrega un paso a la conversación: requiere decisión de producto.** |
 | F3.3 | Reemplazar `mockGetSlots` | `booked === true` significa **disponible** (confirmado por el contacto técnico backend de Pangi). Una llamada por día. Fecha en `MM/DD/YYYY`. |
 | F3.4 | Zonas horarias reales | Usar el `time_zone` que devuelve la API. Convertir a la zona del paciente. |
 | F3.5 | Modalidad desde datos reales | `appointment[].code` → `in_person` / `online` |
 
-**Nota:** F3.4 cumple, con datos reales y sin trabajo extra, la gestión de zonas horarias que la propuesta original vendió a el CEO de Pangi como diferenciador de NOVA.
+**Nota:** F3.4 cumple, con datos reales y sin trabajo extra, la gestión
+de zonas horarias que la propuesta original vendió a el CEO de Pangi como
+diferenciador de NOVA.
+
+**Costura visible hoy:** NOVA dice "Encontré 3 especialistas en *Bogota*"
+—nombre del catálogo real— pero las fichas dicen "📍 Bogotá, Colombia",
+que sale de los 18 doctores mock. F3.1 la elimina.
 
 ## F6 · Widget
 **31 ago – 11 sep · Sin dependencias técnicas · PRIORIDAD sobre WhatsApp**
@@ -324,6 +346,14 @@ POST /api/patient/add-appointment              (bloqueado por PIN)
 - **`Teeth Cleaning (Prophylaxis) `** tiene espacio final en Pangi. Los strings se copian literalmente, nunca se escriben a mano.
 - **Puerto 5678 cerrado en el VPS** (18 ago) — n8n escuchaba en todas las interfaces con el firewall abierto. Nginx hace proxy por `localhost`, así que no se rompió nada.
 - **Alias de LiteLLM** — verificar tras migrar a Azure. Un alias mal configurado ya causó fallos silenciosos de NLG.
+- **`cleanup_expired_sessions()` es `RETURNS void`** — no informa cuántas
+  sesiones marcó, así que `07_maintenance` no tiene visibilidad de eso.
+  Mejorable cambiando la función en Postgres.
+- **Estado `complete` no entiende "cotizar en otra ciudad"** — responde
+  sobre ATLAS en bucle. Requiere decidir si agregar destinos a la
+  solicitud publicada o crear una nueva; depende del contrato de F4.
+- **SAGE no maneja archivos** — promete recibir fotos y exámenes pero no
+  tiene rama para `messageType: 'file'`. Es F4.5.
 
 ---
 

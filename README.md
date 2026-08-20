@@ -127,12 +127,28 @@ que quienes los invocan):
 3. `01_nova.json`, `02_sage.json`, `03_atlas.json`
 4. `00_orchestrator_telegram.json`
 
-`06_pangi_catalog_sync.json` es independiente: no lo invoca nadie y no
-invoca a nadie. Se puede importar en cualquier momento.
+Dos workflows son independientes — no los invoca nadie y no invocan a
+nadie, así que se pueden importar en cualquier momento:
 
-NOVA consulta el catálogo antes del motor, vía `05_db_manager`
-(`getCities`). Si esa llamada falla, el motor cae a su lista literal y
-la conversación continúa — degradación elegante, no error.
+- **`06_pangi_catalog_sync.json`** — schedule horario. Trae el catálogo
+  de Pangi (especialidades, procedimientos, ciudades) a las tablas
+  espejo. Tiene guarda de plausibilidad: si llegan menos de 15
+  especialidades no escribe nada, para que una respuesta vacía durante
+  un despliegue de Pangi no borre el catálogo local. Cada corrida queda
+  en `pangi_catalog_sync_log`.
+- **`07_maintenance.json`** — schedule diario 04:00 más trigger manual.
+  Purga `message_dedup` (>1 h) y marca sesiones vencidas como
+  `expired`. **No borra sesiones ni historial**: la retención de datos
+  es una decisión de política HIPAA, pendiente.
+
+Va separado del de catálogo a propósito: son ciclos de vida distintos
+—uno corre porque Pangi cambia, el otro porque pasa el tiempo— y ahí
+vivirán las políticas de retención cuando se definan.
+
+NOVA y SAGE consultan el catálogo antes del motor, vía `05_db_manager`
+(`getCities`, `getProcedures`). Si esa llamada falla, los motores caen a
+sus listas literales y la conversación continúa — degradación elegante,
+no error.
 
 Tras importar hay que reconectar credenciales manualmente — los exports
 de n8n no las incluyen.
@@ -142,6 +158,11 @@ de n8n no las incluyen.
 > el repositorio guardaba la anterior. La fuente de verdad de lo que
 > está corriendo es n8n; la del proyecto es este repositorio, y deben
 > coincidir.
+
+> **Al actualizar un sub-workflow, verificar que n8n quedó con la
+> versión nueva.** Un `05_db_manager` desactualizado no da error: la
+> operación desconocida devuelve `success: false` y el llamador cae a
+> su fallback en silencio.
 
 `workflows/_legacy/` contiene el orquestador original de WhatsApp vía
 Evolution API, previo a la migración a Telegram. Se conserva como
