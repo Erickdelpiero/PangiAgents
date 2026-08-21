@@ -91,6 +91,7 @@ psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/006_pangi_catalog_
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/007_fix_catalog_view.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/008_kb_i18n_names.sql
 psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/009_kb_display_order.sql
+psql -U pangi_user -h localhost -d pangi_dev -f db/migrations/010_pangi_doctors.sql
 ```
 
 `001` crea el schema y siembra la knowledge base (22 procedimientos:
@@ -111,6 +112,9 @@ entonces vivían solo dentro del literal `PROCEDURES` del motor de SAGE.
 motor numera la lista por índice y acepta ese número como respuesta, así
 que el orden del array es lo que el paciente ve como "1.", "2.", "3." —
 y el del literal es curado, no alfabético.
+`010` extiende el espejo con doctores, clínicas y los procedimientos que
+ofrece cada uno. El `_id` de clínica es lo que viaja como `clinic_address`
+al consultar horarios y al reservar.
 
 > **Los strings de Pangi se copian literalmente, nunca se escriben a
 > mano.** Varios llevan guion largo (`–`, U+2013) y uno lleva espacio
