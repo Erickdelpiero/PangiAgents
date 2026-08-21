@@ -85,12 +85,12 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// ============================================================\n// 06_pangi_catalog_sync — Construcción de SQL\n// ------------------------------------------------------------\n// Toma las respuestas de los 3 endpoints públicos de Pangi y\n// arma las sentencias de upsert. No escribe nada: solo construye.\n//\n// FUENTES (una llamada a speciality trae los 3 idiomas):\n//   /api/common/speciality?lang=en   → especialidades + procedimientos\n//   /api/common/countries            → catálogo curado de ciudades\n//   /api/common/available-locations  → ciudades con médicos reales\n// ============================================================\n\nconst runAt = new Date().toISOString();\nconst source = ($execution && $execution.mode === 'test') ? 'manual' : 'schedule';\n\n// ── Sanitizadores ──\nconst q = (v) => (v === null || v === undefined || v === '')\n  ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qi = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : 'NULL'; };\nconst qb = (v) => (v === true || v === 'true') ? 'TRUE' : 'FALSE';\n\n// sub_speciality, states y cities llegan como STRING con JSON adentro.\n// Proctology llega como array real. Hay que soportar ambos.\nconst parseArr = (v) => {\n  if (Array.isArray(v)) return v;\n  if (typeof v === 'string' && v.trim()) {\n    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }\n  }\n  return [];\n};\n\nconst fail = (msg) => [{ json: { valid: false, runAt, source, error: msg,\n  sqlLogFail: \"INSERT INTO pangi_catalog_sync_log \" +\n    \"(started_at, finished_at, status, trigger_source, error_message) VALUES (\" +\n    q(runAt) + \"::timestamptz, NOW(), 'failed', \" + q(source) + \", \" + q(msg) + \");\" } }];\n\n// ── 1. Leer las tres respuestas ──\nlet rSpec, rCountries, rLocations;\ntry {\n  rSpec      = $('🌐 API — Especialidades').first().json;\n  rCountries = $('🌐 API — Países').first().json;\n  rLocations = $('🌐 API — Ubicaciones Activas').first().json;\n} catch (e) {\n  return fail('No se pudieron leer las respuestas del API: ' + e.message);\n}\n\nconst specData = (rSpec && Array.isArray(rSpec.data)) ? rSpec.data : [];\nconst cntData  = (rCountries && Array.isArray(rCountries.data)) ? rCountries.data : [];\nconst locData  = (rLocations && Array.isArray(rLocations.data)) ? rLocations.data : [];\n\n// Guarda de plausibilidad: Pangi tiene 22 especialidades. Si llegan\n// muchas menos, algo salió mal y NO se debe tocar el catálogo local.\nconst MIN_SPECIALTIES = 15;\nif (specData.length < MIN_SPECIALTIES) {\n  return fail('Respuesta implausible: ' + specData.length +\n              ' especialidades (mínimo esperado ' + MIN_SPECIALTIES + ')');\n}\nif (cntData.length === 0 && locData.length === 0) {\n  return fail('Ambas fuentes de ciudades vinieron vacías');\n}\n\n// ── 2. Especialidades ──\nconst specRows = [];\nconst procRows = [];\nconst seenProc = new Set();\n\nfor (const s of specData) {\n  if (!s || !s._id || !s.name) continue;\n\n  specRows.push('(' + [\n    q(s._id), q(s.name), q(s.name_es), q(s.name_pt),\n    qb(s.is_visible), qi(s.allow_number_of_procedure) === 'NULL' ? '1' : qi(s.allow_number_of_procedure),\n    q(s.doc_en), q(s.doc_es), q(s.doc_pt), q(s.logo), q(runAt) + '::timestamptz'\n  ].join(', ') + ')');\n\n  // Procedimientos: arreglos PARALELOS alineados por posición.\n  // Dental tiene 48 en inglés y 0 traducidos → name_es/name_pt en NULL.\n  const en = parseArr(s.sub_speciality);\n  const es = parseArr(s.sub_speciality_es);\n  const pt = parseArr(s.sub_speciality_pt);\n\n  for (let i = 0; i < en.length; i++) {\n    const name = en[i];\n    if (typeof name !== 'string' || !name) continue;\n    // Dedup: ON CONFLICT no puede afectar la misma fila dos veces\n    // dentro de un mismo INSERT.\n    const key = s._id + '||' + name;\n    if (seenProc.has(key)) continue;\n    seenProc.add(key);\n\n    procRows.push('(' + [\n      q(s._id), String(i), q(name),\n      q(es[i] !== undefined ? es[i] : null),\n      q(pt[i] !== undefined ? pt[i] : null),\n      q(runAt) + '::timestamptz'\n    ].join(', ') + ')');\n  }\n}\n\nif (specRows.length === 0) return fail('Ninguna especialidad válida tras el parseo');\nif (procRows.length === 0) return fail('Ningún procedimiento válido tras el parseo');\n\n// ── 3. Ciudades: unión de las dos fuentes ──\n// countries           → in_catalog  (catálogo curado)\n// available-locations → has_doctors (dónde hay médicos de verdad)\nconst cityMap = new Map();\nconst putCity = (code, cname, city, flag) => {\n  if (!code || !city) return;\n  const key = code + '||' + city;\n  const prev = cityMap.get(key) || { code, cname, city, in_catalog: false, has_doctors: false };\n  prev[flag] = true;\n  if (cname) prev.cname = cname;\n  cityMap.set(key, prev);\n};\n\nfor (const c of cntData) {\n  if (!c || !c.code) continue;\n  for (const city of parseArr(c.cities)) {\n    if (typeof city === 'string' && city) putCity(c.code, c.name, city, 'in_catalog');\n  }\n}\nfor (const l of locData) {\n  const code = l && l.country ? l.country.code : null;\n  const cname = l && l.country ? l.country.name : null;\n  for (const city of (Array.isArray(l.cities) ? l.cities : [])) {\n    if (typeof city === 'string' && city) putCity(code, cname, city, 'has_doctors');\n  }\n}\n\nconst cityRows = [];\nfor (const c of cityMap.values()) {\n  cityRows.push('(' + [\n    q(c.code), q(c.cname || c.code), q(c.city),\n    qb(c.in_catalog), qb(c.has_doctors), q(runAt) + '::timestamptz'\n  ].join(', ') + ')');\n}\nif (cityRows.length === 0) return fail('Ninguna ciudad válida tras el parseo');\n\n// ── 4. Sentencias ──\nconst sqlSpecialties =\n  'INSERT INTO pangi_specialties ' +\n  '(pangi_id, name, name_es, name_pt, is_visible, allow_number_of_procedure, ' +\n  ' doc_en, doc_es, doc_pt, logo, synced_at) VALUES\\n' +\n  specRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (pangi_id) DO UPDATE SET ' +\n  'name = EXCLUDED.name, name_es = EXCLUDED.name_es, name_pt = EXCLUDED.name_pt, ' +\n  'is_visible = EXCLUDED.is_visible, ' +\n  'allow_number_of_procedure = EXCLUDED.allow_number_of_procedure, ' +\n  'doc_en = EXCLUDED.doc_en, doc_es = EXCLUDED.doc_es, doc_pt = EXCLUDED.doc_pt, ' +\n  'logo = EXCLUDED.logo, synced_at = EXCLUDED.synced_at;';\n\nconst sqlProcedures =\n  'INSERT INTO pangi_procedures ' +\n  '(specialty_pangi_id, position, name, name_es, name_pt, synced_at) VALUES\\n' +\n  procRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (specialty_pangi_id, name) DO UPDATE SET ' +\n  'position = EXCLUDED.position, name_es = EXCLUDED.name_es, ' +\n  'name_pt = EXCLUDED.name_pt, synced_at = EXCLUDED.synced_at;';\n\nconst sqlCities =\n  'INSERT INTO pangi_cities ' +\n  '(country_code, country_name, city, in_catalog, has_doctors, synced_at) VALUES\\n' +\n  cityRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (country_code, city) DO UPDATE SET ' +\n  'country_name = EXCLUDED.country_name, in_catalog = EXCLUDED.in_catalog, ' +\n  'has_doctors = EXCLUDED.has_doctors, synced_at = EXCLUDED.synced_at;';\n\n// Limpieza + bitácora en UNA sola sentencia (CTE), para no depender\n// de que el nodo Postgres acepte múltiples sentencias.\n// Las especialidades NO se borran aquí: is_visible ya las oculta y\n// borrarlas cascadearía procedimientos dentro del mismo statement.\nconst sqlCleanupAndLog =\n  'WITH del_proc AS (' +\n  '  DELETE FROM pangi_procedures WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1' +\n  '), del_city AS (' +\n  '  DELETE FROM pangi_cities WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1' +\n  ') INSERT INTO pangi_catalog_sync_log ' +\n  '(started_at, finished_at, status, specialties_seen, procedures_seen, ' +\n  ' cities_seen, rows_deleted, trigger_source) ' +\n  'SELECT ' + q(runAt) + '::timestamptz, NOW(), \\'ok\\', ' +\n  specRows.length + ', ' + procRows.length + ', ' + cityRows.length + ', ' +\n  '(SELECT COUNT(*) FROM del_proc) + (SELECT COUNT(*) FROM del_city), ' +\n  q(source) + ';';\n\nreturn [{ json: {\n  valid: true, runAt, source,\n  counts: { specialties: specRows.length, procedures: procRows.length, cities: cityRows.length },\n  sqlSpecialties, sqlProcedures, sqlCities, sqlCleanupAndLog\n} }];\n"
+        "jsCode": "\n// ============================================================\n// 06_pangi_catalog_sync — Construcción de SQL\n// ------------------------------------------------------------\n// Toma las respuestas de los 3 endpoints públicos de Pangi y\n// arma las sentencias de upsert. No escribe nada: solo construye.\n//\n// FUENTES (una llamada a speciality trae los 3 idiomas):\n//   /api/common/speciality?lang=en   → especialidades + procedimientos\n//   /api/common/countries            → catálogo curado de ciudades\n//   /api/common/available-locations  → ciudades con médicos reales\n// ============================================================\n\nconst runAt = new Date().toISOString();\nconst source = ($execution && $execution.mode === 'test') ? 'manual' : 'schedule';\n\n// ── Sanitizadores ──\nconst q = (v) => (v === null || v === undefined || v === '')\n  ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qi = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : 'NULL'; };\nconst qb = (v) => (v === true || v === 'true') ? 'TRUE' : 'FALSE';\n\n// sub_speciality, states y cities llegan como STRING con JSON adentro.\n// Proctology llega como array real. Hay que soportar ambos.\nconst parseArr = (v) => {\n  if (Array.isArray(v)) return v;\n  if (typeof v === 'string' && v.trim()) {\n    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }\n  }\n  return [];\n};\n\nconst fail = (msg) => [{ json: { valid: false, runAt, source, error: msg,\n  sqlLogFail: \"INSERT INTO pangi_catalog_sync_log \" +\n    \"(started_at, finished_at, status, trigger_source, error_message) VALUES (\" +\n    q(runAt) + \"::timestamptz, NOW(), 'failed', \" + q(source) + \", \" + q(msg) + \");\" } }];\n\n// ── 1. Leer las tres respuestas ──\nlet rSpec, rCountries, rLocations;\ntry {\n  rSpec      = $('🌐 API — Especialidades').first().json;\n  rCountries = $('🌐 API — Países').first().json;\n  rLocations = $('🌐 API — Ubicaciones Activas').first().json;\n} catch (e) {\n  return fail('No se pudieron leer las respuestas del API: ' + e.message);\n}\n\n// Doctores: se lee APARTE y sin abortar. Un fallo aquí NO debe impedir\n// que se sincronicen especialidades, procedimientos y ciudades.\nlet rDoctors = null;\ntry { rDoctors = $('🌐 API — Doctores').first().json; } catch (e) { /* opcional */ }\n\nconst specData = (rSpec && Array.isArray(rSpec.data)) ? rSpec.data : [];\nconst cntData  = (rCountries && Array.isArray(rCountries.data)) ? rCountries.data : [];\nconst locData  = (rLocations && Array.isArray(rLocations.data)) ? rLocations.data : [];\n\n// Guarda de plausibilidad: Pangi tiene 22 especialidades. Si llegan\n// muchas menos, algo salió mal y NO se debe tocar el catálogo local.\nconst MIN_SPECIALTIES = 15;\nif (specData.length < MIN_SPECIALTIES) {\n  return fail('Respuesta implausible: ' + specData.length +\n              ' especialidades (mínimo esperado ' + MIN_SPECIALTIES + ')');\n}\nif (cntData.length === 0 && locData.length === 0) {\n  return fail('Ambas fuentes de ciudades vinieron vacías');\n}\n\n// ── 2. Especialidades ──\nconst specRows = [];\nconst procRows = [];\nconst seenProc = new Set();\n\nfor (const s of specData) {\n  if (!s || !s._id || !s.name) continue;\n\n  specRows.push('(' + [\n    q(s._id), q(s.name), q(s.name_es), q(s.name_pt),\n    qb(s.is_visible), qi(s.allow_number_of_procedure) === 'NULL' ? '1' : qi(s.allow_number_of_procedure),\n    q(s.doc_en), q(s.doc_es), q(s.doc_pt), q(s.logo), q(runAt) + '::timestamptz'\n  ].join(', ') + ')');\n\n  // Procedimientos: arreglos PARALELOS alineados por posición.\n  // Dental tiene 48 en inglés y 0 traducidos → name_es/name_pt en NULL.\n  const en = parseArr(s.sub_speciality);\n  const es = parseArr(s.sub_speciality_es);\n  const pt = parseArr(s.sub_speciality_pt);\n\n  for (let i = 0; i < en.length; i++) {\n    const name = en[i];\n    if (typeof name !== 'string' || !name) continue;\n    // Dedup: ON CONFLICT no puede afectar la misma fila dos veces\n    // dentro de un mismo INSERT.\n    const key = s._id + '||' + name;\n    if (seenProc.has(key)) continue;\n    seenProc.add(key);\n\n    procRows.push('(' + [\n      q(s._id), String(i), q(name),\n      q(es[i] !== undefined ? es[i] : null),\n      q(pt[i] !== undefined ? pt[i] : null),\n      q(runAt) + '::timestamptz'\n    ].join(', ') + ')');\n  }\n}\n\nif (specRows.length === 0) return fail('Ninguna especialidad válida tras el parseo');\nif (procRows.length === 0) return fail('Ningún procedimiento válido tras el parseo');\n\n// ── 3. Ciudades: unión de las dos fuentes ──\n// countries           → in_catalog  (catálogo curado)\n// available-locations → has_doctors (dónde hay médicos de verdad)\nconst cityMap = new Map();\nconst putCity = (code, cname, city, flag) => {\n  if (!code || !city) return;\n  const key = code + '||' + city;\n  const prev = cityMap.get(key) || { code, cname, city, in_catalog: false, has_doctors: false };\n  prev[flag] = true;\n  if (cname) prev.cname = cname;\n  cityMap.set(key, prev);\n};\n\nfor (const c of cntData) {\n  if (!c || !c.code) continue;\n  for (const city of parseArr(c.cities)) {\n    if (typeof city === 'string' && city) putCity(c.code, c.name, city, 'in_catalog');\n  }\n}\nfor (const l of locData) {\n  const code = l && l.country ? l.country.code : null;\n  const cname = l && l.country ? l.country.name : null;\n  for (const city of (Array.isArray(l.cities) ? l.cities : [])) {\n    if (typeof city === 'string' && city) putCity(code, cname, city, 'has_doctors');\n  }\n}\n\nconst cityRows = [];\nfor (const c of cityMap.values()) {\n  cityRows.push('(' + [\n    q(c.code), q(c.cname || c.code), q(c.city),\n    qb(c.in_catalog), qb(c.has_doctors), q(runAt) + '::timestamptz'\n  ].join(', ') + ')');\n}\nif (cityRows.length === 0) return fail('Ninguna ciudad válida tras el parseo');\n\n// ── 4. Sentencias ──\nconst sqlSpecialties =\n  'INSERT INTO pangi_specialties ' +\n  '(pangi_id, name, name_es, name_pt, is_visible, allow_number_of_procedure, ' +\n  ' doc_en, doc_es, doc_pt, logo, synced_at) VALUES\\n' +\n  specRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (pangi_id) DO UPDATE SET ' +\n  'name = EXCLUDED.name, name_es = EXCLUDED.name_es, name_pt = EXCLUDED.name_pt, ' +\n  'is_visible = EXCLUDED.is_visible, ' +\n  'allow_number_of_procedure = EXCLUDED.allow_number_of_procedure, ' +\n  'doc_en = EXCLUDED.doc_en, doc_es = EXCLUDED.doc_es, doc_pt = EXCLUDED.doc_pt, ' +\n  'logo = EXCLUDED.logo, synced_at = EXCLUDED.synced_at;';\n\nconst sqlProcedures =\n  'INSERT INTO pangi_procedures ' +\n  '(specialty_pangi_id, position, name, name_es, name_pt, synced_at) VALUES\\n' +\n  procRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (specialty_pangi_id, name) DO UPDATE SET ' +\n  'position = EXCLUDED.position, name_es = EXCLUDED.name_es, ' +\n  'name_pt = EXCLUDED.name_pt, synced_at = EXCLUDED.synced_at;';\n\nconst sqlCities =\n  'INSERT INTO pangi_cities ' +\n  '(country_code, country_name, city, in_catalog, has_doctors, synced_at) VALUES\\n' +\n  cityRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (country_code, city) DO UPDATE SET ' +\n  'country_name = EXCLUDED.country_name, in_catalog = EXCLUDED.in_catalog, ' +\n  'has_doctors = EXCLUDED.has_doctors, synced_at = EXCLUDED.synced_at;';\n\n// Limpieza + bitácora en UNA sola sentencia (CTE), para no depender\n// de que el nodo Postgres acepte múltiples sentencias.\n// Las especialidades NO se borran aquí: is_visible ya las oculta y\n// borrarlas cascadearía procedimientos dentro del mismo statement.\n// ── 3b. DOCTORES, CLÍNICAS Y SUS PROCEDIMIENTOS ─────────────\n// Se validan y construyen de forma INDEPENDIENTE del catálogo.\n// Si vienen mal, se emite una sentencia inerte (SELECT 0) en los tres\n// nodos y la bitácora lo registra como 'skipped'. El catálogo sigue.\nconst MIN_DOCTORS = 20;   // hay 28; menos de 20 es implausible\nconst NOOP = 'SELECT 0 AS skipped';\n\nlet docRows = [], clinicRows = [], docProcRows = [];\nlet doctorsStatus = 'skipped';\nlet doctorsError  = null;\n\n(() => {\n  const dd = (rDoctors && Array.isArray(rDoctors.data) && rDoctors.data[0]\n              && Array.isArray(rDoctors.data[0].data)) ? rDoctors.data[0].data : [];\n  if (dd.length === 0) { doctorsError = 'respuesta de doctores vacía o con forma inesperada'; return; }\n  if (dd.length < MIN_DOCTORS) {\n    doctorsError = 'implausible: ' + dd.length + ' doctores (mínimo ' + MIN_DOCTORS + ')';\n    return;\n  }\n\n  const seenClinic = new Set();\n  const seenProc   = new Set();\n\n  for (const x of dd) {\n    if (!x || !x._id || !x.first_name) continue;\n\n    // Modalidades desde appointment[].code\n    const modes = Array.isArray(x.appointment)\n      ? x.appointment.map(a => String((a && a.code) || '').toLowerCase()) : [];\n    const hasInPerson = modes.includes('in_person');\n    const hasOnline   = modes.includes('online') || modes.includes('video');\n\n    const clinics = Array.isArray(x.all_clinic_address) ? x.all_clinic_address : [];\n\n    // Agendable: presencial EXIGE clínica (date-slots pide clinic_address).\n    // Video NO la exige: para eso existe slots-online.\n    const acceptsInPerson = hasInPerson && clinics.length > 0;\n    const bookable        = acceptsInPerson || hasOnline;\n\n    // languages: solo 3 de 28 lo tienen. El segundo elemento del ejemplo\n    // ('Spanish (Latin America)') NO trae code → se cae al name.\n    const langs = Array.isArray(x.languages)\n      ? x.languages.map(l => (l && (l.code || l.name)) || '').filter(Boolean).join(', ')\n      : '';\n\n    const degrees = Array.isArray(x.dr_degree) ? x.dr_degree.filter(Boolean).join(', ') : '';\n    const yrs = (x.area_of_expertise && x.area_of_expertise.name) || null;\n\n    docRows.push('(' + [\n      q(x._id), q(x.first_name), q(x.last_name), q(x.designation),\n      q(x.professional_title), q(x.gender), q(x.profile_pic), q(x.about),\n      q(yrs), q(degrees), q(x.licence_number), q(langs),\n      qb(acceptsInPerson), qb(hasOnline), qb(bookable),\n      (Number.isFinite(parseFloat(x.averageRate)) ? String(parseFloat(x.averageRate)) : '0'),\n      (qi(x.reviewCounts) === 'NULL' ? '0' : qi(x.reviewCounts)),\n      qb(x.is_approve), q(x.status), q(x.practice_name), q(x.website),\n      q(runAt) + '::timestamptz'\n    ].join(', ') + ')');\n\n    for (const c of clinics) {\n      if (!c || !c._id || seenClinic.has(c._id)) continue;\n      seenClinic.add(c._id);\n      const cn = (c.country_name && c.country_name.name) || null;\n      const lat = parseFloat(c.latitude), lng = parseFloat(c.longitude);\n      clinicRows.push('(' + [\n        q(c._id), q(x._id), q(c.clinic), q(c.name), q(c.address1), q(c.address2),\n        q(c.city), q(c.state), q(cn),\n        (Number.isFinite(lat) ? String(lat) : 'NULL'),\n        (Number.isFinite(lng) ? String(lng) : 'NULL'),\n        q(runAt) + '::timestamptz'\n      ].join(', ') + ')');\n    }\n\n    // procedure[] → lo que ofrece y, además, la fuente del desplegable\n    // \"Motivo de la Visita\" en la web (get-treatment-reason viene vacío\n    // en TODOS los doctores, verificado).\n    for (const p of (Array.isArray(x.procedure) ? x.procedure : [])) {\n      const nm = p && p.name;\n      if (typeof nm !== 'string' || !nm) continue;\n      const key = x._id + '||' + nm;\n      if (seenProc.has(key)) continue;   // ON CONFLICT no admite la misma fila 2 veces\n      seenProc.add(key);\n      docProcRows.push('(' + [\n        q(x._id), q(nm), q(p.type || 'system'), q(runAt) + '::timestamptz'\n      ].join(', ') + ')');\n    }\n  }\n\n  if (docRows.length === 0) { doctorsError = 'ningún doctor válido tras el parseo'; return; }\n  doctorsStatus = 'ok';\n})();\n\nconst sqlDoctors = doctorsStatus !== 'ok' ? NOOP :\n  'INSERT INTO pangi_doctors ' +\n  '(pangi_id, first_name, last_name, designation, professional_title, gender, ' +\n  ' profile_pic, about, years_experience, degrees, license_number, languages, ' +\n  ' accepts_in_person, accepts_online, is_bookable, average_rate, review_count, ' +\n  ' is_approve, status, practice_name, website, synced_at) VALUES\\n' +\n  docRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (pangi_id) DO UPDATE SET ' +\n  'first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, ' +\n  'designation = EXCLUDED.designation, professional_title = EXCLUDED.professional_title, ' +\n  'gender = EXCLUDED.gender, profile_pic = EXCLUDED.profile_pic, about = EXCLUDED.about, ' +\n  'years_experience = EXCLUDED.years_experience, degrees = EXCLUDED.degrees, ' +\n  'license_number = EXCLUDED.license_number, languages = EXCLUDED.languages, ' +\n  'accepts_in_person = EXCLUDED.accepts_in_person, accepts_online = EXCLUDED.accepts_online, ' +\n  'is_bookable = EXCLUDED.is_bookable, average_rate = EXCLUDED.average_rate, ' +\n  'review_count = EXCLUDED.review_count, is_approve = EXCLUDED.is_approve, ' +\n  'status = EXCLUDED.status, practice_name = EXCLUDED.practice_name, ' +\n  'website = EXCLUDED.website, synced_at = EXCLUDED.synced_at;';\n\nconst sqlClinics = (doctorsStatus !== 'ok' || clinicRows.length === 0) ? NOOP :\n  'INSERT INTO pangi_clinics ' +\n  '(pangi_id, doctor_pangi_id, label, name, address1, address2, city, state, ' +\n  ' country_name, latitude, longitude, synced_at) VALUES\\n' +\n  clinicRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (pangi_id) DO UPDATE SET ' +\n  'doctor_pangi_id = EXCLUDED.doctor_pangi_id, label = EXCLUDED.label, ' +\n  'name = EXCLUDED.name, address1 = EXCLUDED.address1, address2 = EXCLUDED.address2, ' +\n  'city = EXCLUDED.city, state = EXCLUDED.state, country_name = EXCLUDED.country_name, ' +\n  'latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude, ' +\n  'synced_at = EXCLUDED.synced_at;';\n\nconst sqlDoctorProcedures = (doctorsStatus !== 'ok' || docProcRows.length === 0) ? NOOP :\n  'INSERT INTO pangi_doctor_procedures (doctor_pangi_id, name, source, synced_at) VALUES\\n' +\n  docProcRows.join(',\\n') + '\\n' +\n  'ON CONFLICT (doctor_pangi_id, name) DO UPDATE SET ' +\n  'source = EXCLUDED.source, synced_at = EXCLUDED.synced_at;';\n\n// Los doctores solo se limpian si su sincronización fue 'ok': de lo\n// contrario se borrarían todos por no haberse refrescado.\nconst _delDoctors = doctorsStatus === 'ok'\n  ? '), del_doc AS (  DELETE FROM pangi_doctors WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1'\n  : '), del_doc AS (  SELECT 1 WHERE FALSE';\n\nconst sqlCleanupAndLog =\n  'WITH del_proc AS (' +\n  '  DELETE FROM pangi_procedures WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1' +\n  '), del_city AS (' +\n  '  DELETE FROM pangi_cities WHERE synced_at < ' + q(runAt) + '::timestamptz RETURNING 1' +\n  _delDoctors +\n  ') INSERT INTO pangi_catalog_sync_log ' +\n  '(started_at, finished_at, status, specialties_seen, procedures_seen, ' +\n  ' cities_seen, doctors_seen, clinics_seen, doctors_status, ' +\n  ' rows_deleted, error_message, trigger_source) ' +\n  'SELECT ' + q(runAt) + '::timestamptz, NOW(), ' +\n  q(doctorsStatus === 'ok' ? 'ok' : 'partial') + ', ' +\n  specRows.length + ', ' + procRows.length + ', ' + cityRows.length + ', ' +\n  docRows.length + ', ' + clinicRows.length + ', ' + q(doctorsStatus) + ', ' +\n  '(SELECT COUNT(*) FROM del_proc) + (SELECT COUNT(*) FROM del_city) + (SELECT COUNT(*) FROM del_doc), ' +\n  q(doctorsError) + ', ' + q(source) + ';';\n\nreturn [{ json: {\n  valid: true, runAt, source,\n  counts: { specialties: specRows.length, procedures: procRows.length, cities: cityRows.length,\n            doctors: docRows.length, clinics: clinicRows.length, doctorProcedures: docProcRows.length },\n  doctorsStatus, doctorsError,\n  sqlSpecialties, sqlProcedures, sqlCities,\n  sqlDoctors, sqlClinics, sqlDoctorProcedures,\n  sqlCleanupAndLog\n} }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
+        800,
         80
       ],
       "id": "a1000000-0000-4000-8000-000000000006",
@@ -122,7 +122,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        800,
+        1000,
         80
       ],
       "id": "a1000000-0000-4000-8000-000000000007",
@@ -137,7 +137,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1020,
+        1220,
         -20
       ],
       "id": "a1000000-0000-4000-8000-000000000008",
@@ -159,7 +159,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1220,
+        1420,
         -20
       ],
       "id": "a1000000-0000-4000-8000-000000000009",
@@ -181,7 +181,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1420,
+        1620,
         -20
       ],
       "id": "a1000000-0000-4000-8000-00000000000a",
@@ -203,7 +203,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1620,
+        2420,
         -20
       ],
       "id": "a1000000-0000-4000-8000-00000000000b",
@@ -225,11 +225,94 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1020,
+        1220,
         200
       ],
       "id": "a1000000-0000-4000-8000-00000000000c",
       "name": "⚠️ Registrar Fallo",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "https://pangi.com/api/common/doctors?limit=100",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        600,
+        80
+      ],
+      "id": "f1000000-0000-4000-8000-000000000001",
+      "name": "🌐 API — Doctores",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlDoctors }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1820,
+        -20
+      ],
+      "id": "f1000000-0000-4000-8000-000000000002",
+      "name": "🗄️ Upsert Doctores",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlClinics }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2020,
+        -20
+      ],
+      "id": "f1000000-0000-4000-8000-000000000003",
+      "name": "🗄️ Upsert Clínicas",
+      "credentials": {
+        "postgres": {
+          "id": "uimRifT0rf5zFCaO",
+          "name": "Pangi DB (pangi_dev)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('🔧 Construir SQL').first().json.sqlDoctorProcedures }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2220,
+        -20
+      ],
+      "id": "f1000000-0000-4000-8000-000000000004",
+      "name": "🗄️ Upsert Proc. Doctores",
       "credentials": {
         "postgres": {
           "id": "uimRifT0rf5zFCaO",
@@ -289,7 +372,7 @@
       "main": [
         [
           {
-            "node": "🔧 Construir SQL",
+            "node": "🌐 API — Doctores",
             "type": "main",
             "index": 0
           }
@@ -333,7 +416,7 @@
       "main": [
         [
           {
-            "node": "🧹 Limpiar y Registrar",
+            "node": "🗄️ Upsert Doctores",
             "type": "main",
             "index": 0
           }
@@ -352,6 +435,50 @@
         [
           {
             "node": "⚠️ Registrar Fallo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌐 API — Doctores": {
+      "main": [
+        [
+          {
+            "node": "🔧 Construir SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ Upsert Doctores": {
+      "main": [
+        [
+          {
+            "node": "🗄️ Upsert Clínicas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ Upsert Clínicas": {
+      "main": [
+        [
+          {
+            "node": "🗄️ Upsert Proc. Doctores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ Upsert Proc. Doctores": {
+      "main": [
+        [
+          {
+            "node": "🧹 Limpiar y Registrar",
             "type": "main",
             "index": 0
           }

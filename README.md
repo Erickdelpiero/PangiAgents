@@ -139,7 +139,10 @@ nadie, así que se pueden importar en cualquier momento:
   espejo. Tiene guarda de plausibilidad: si llegan menos de 15
   especialidades no escribe nada, para que una respuesta vacía durante
   un despliegue de Pangi no borre el catálogo local. Cada corrida queda
-  en `pangi_catalog_sync_log`.
+  en `pangi_catalog_sync_log`.  El workflow `06_pangi_catalog_sync` sincroniza
+  también doctores, clínicas y sus procedimientos. La validación de doctores es 
+  independiente de la del catálogo: si una falla, la otra se sincroniza igual y 
+  la bitácora lo registra como `partial`.
 - **`07_maintenance.json`** — schedule diario 04:00 más trigger manual.
   Purga `message_dedup` (>1 h) y marca sesiones vencidas como
   `expired`. **No borra sesiones ni historial**: la retención de datos
