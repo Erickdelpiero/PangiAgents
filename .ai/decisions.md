@@ -143,3 +143,59 @@ motor.
 
 **Estado:** in_review. Pendiente de aprobación del diff por Erick y de
 la primera prueba real en Telegram.
+
+### [2026-09-03] F3-E cerrada — primera reserva real exitosa
+
+**Contexto:** con X-Pangi-Service-Key verificada y la implementación de
+F3-E aprobada, se hizo la primera prueba real en Telegram: agendamiento
+completo con Kevin Fleishman (Fort Lauderdale) y paciente de prueba
+lola_pruebas. La reserva se creó correctamente en Pangi (appointment_ref
+real de Mongo, ej. 6a99a6a8a1c2d2c7e2998f13, confirmada visible en
+admin.pangi.com).
+
+**Hallazgo durante la prueba:** discrepancia de horario entre lo
+seleccionado en el chat (09:00) y lo mostrado en el admin panel de
+Pangi (04:00 AM). Investigado con logs de n8n + curl directo contra
+producción (sin pasar por nuestro sistema): confirmado que
+date-slots-range devuelve time_zone=America/Bogota para la clínica de
+Fort Lauderdale del doctor de prueba — dato de configuración incorrecto
+del lado de Pangi, no un bug de nuestro código (que lee y persiste el
+dato tal cual lo recibe, sin transformarlo). Reportado al contacto
+técnico backend de Pangi.
+
+**Decisión:** cerrar F3-E — el flujo de reserva real funciona
+correctamente end-to-end de nuestro lado. El hallazgo de timezone queda
+como item externo, sin bloquear el cierre.
+
+**Estado:** cerrada.
+
+### [2026-09-03] Requerimiento capturado — botones interactivos en Telegram (patrón portable a la web)
+
+**Contexto:** el CEO de Pangi pidió — solicitado por el CEO de Pangi,
+fecha exacta no registrada, es una petición previa a esta fecha —
+agregar botones interactivos en Telegram para reducir las casuísticas de
+texto libre que hoy debe manejar el motor conversacional (typos,
+respuestas ambiguas, valores fuera de enum). La intención es explícita y
+no cosmética: los mismos patrones de UI/UX deben reutilizarse en la
+migración a la web de Pangi (widget / F6), de modo que el diseño de
+interacción se piense una sola vez y se porte.
+
+**Decisión:** registrar el requerimiento y diferir su diseño e
+implementación. A la fecha NO hay diseño de interacción, ni mapeo de qué
+estados del motor pasarían de texto libre a botones, ni implementación en
+`workflows/*.json`. Queda como fase `parked` en `.ai/state.yaml`
+(`id: UX-BTN`) para que no se pierda de vista; se retoma cuando sea
+prioridad, idealmente coordinado con F6 (widget) para diseñar el patrón
+una sola vez.
+
+**Alternativas consideradas:**
+- Abrirlo como fase activa ahora — descartado: no es prioridad frente a
+  F6 y al cierre de la integración con la API de Pangi; diseñarlo antes
+  del widget arriesga rehacer el trabajo de UX dos veces.
+- Registrarlo solo en `docs/roadmap-integracion-pangi.md` — descartado:
+  ese doc está desactualizado respecto a `.ai/state.yaml` y su alcance es
+  la integración con la API de Pangi; este requerimiento es transversal
+  (canal Telegram hoy + web después).
+
+**Estado:** cerrada como registro del requerimiento. El trabajo en sí
+queda `parked` en `.ai/state.yaml`.
