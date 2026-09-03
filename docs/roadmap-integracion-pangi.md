@@ -6,7 +6,7 @@
 **Infraestructura Azure:** el encargado de infraestructura Azure del lado Pangi — provisiona VMs, no es especialista en infra
 **Decisor:** el CEO de Pangi
 **Inicio:** lunes 17 de agosto de 2026
-**Última actualización:** martes 18 de agosto de 2026
+**Última actualización:** jueves 3 de septiembre de 2026
 **Punto de retorno:** tag `mvp-v2-pre-pangi` en `pangi-dev`
 
 ---
@@ -70,7 +70,7 @@ La credencial solo bloquea tres cosas: reservar la cita, leer el perfil del paci
 
 | # | Riesgo | Estado | Mitigación |
 |---|---|---|---|
-| R1 | **PIN por SMS bloquea la reserva.** NOVA no puede completar una cita sola. | 🔴 Abierto — alto | Decisión conjunta el contacto técnico backend de Pangi + el CEO de Pangi. Recomendación: ruta de servicio que omita verificación, ya que el paciente está autenticado por JWT. |
+| R1 | **PIN por SMS bloquea la reserva.** NOVA no puede completar una cita sola. | 🟡 Mitigado en la práctica (3 sep) | F3-E reserva vía `POST /api/service/add-appointment` con la service key, sin PIN — verificado en producción. La decisión formal conjunta el contacto técnico backend de Pangi + el CEO de Pangi sigue sin registrar. Ruta de servicio que omite verificación (paciente autenticado por JWT), ya en uso por F3-E. |
 | R2 | Semántica invertida de `booked` | ✅ **Cerrado 18 ago** | el contacto técnico backend de Pangi confirmó: `booked: true` = disponible. |
 | R3 | Catálogo de cirugía plástica reconstructivo, no estético | ✅ **Cerrado 18 ago** | 10 procedimientos estéticos cargados en el Admin, en tres idiomas. |
 | R4 | Solo 3 de 13 ciudades tienen médicos activos | 🟡 Aceptado | Nos acomodamos a las ciudades que existen. Se llenará cuando Pangi opere. |
@@ -124,21 +124,31 @@ permite una sesión no expirada por usuario, una sesión vencida sin
 marcar seguía bloqueando la creación de una nueva. `07_maintenance` le
 da un llamador.
 
-## F3 · NOVA contra la API real — 🟡 EN PROGRESO
-**F3-A, F3-B, F3-C cerrados · F3-D en diseño · F3-E bloqueada por el contacto técnico backend de Pangi**
+## F3 · NOVA contra la API real — 🟢 NÚCLEO CERRADO
+**F3-A, F3-B, F3-C, F3-D1 y F3-E cerrados · F3-D2 y F3-E-ID quedan `parked` (backlog, sin bloqueo externo) — ver `.ai/state.yaml`**
 
 | # | Tarea | Estado |
 |---|---|---|
 | F3-A | Sincronizar doctores/clínicas/procedimientos a `pangi_doctors`, `pangi_clinics`, `pangi_doctor_procedures` vía `06_pangi_catalog_sync` | ✅ `f3a-doctors-sync` |
 | F3-B | NOVA lee doctores reales (nombres, títulos, clínicas, modalidad). Estrellas solo si `review_count > 0`; se muestra `years_experience` | ✅ `f3b-nova-doctors` |
 | F3-C | NOVA lee horarios reales vía `date-slots-range` (endpoint que el contacto técnico backend de Pangi construyó a pedido, no estaba en el plan original) | ✅ `f3c-real-slots` |
-| F3-D | Preguntar `visit_reason`, `payment_type`, `have_insurance` antes de reservar | 🟡 Diseño de capas listo, falta contrato del backend |
-| F3-E | Reservar de verdad vía `POST /api/service/add-appointment` (no exige PIN, confirmado) | 🔴 Bloqueada — Swagger no documenta el cuerpo |
+| F3-D1 | Preguntar `visit_reason` (3 capas) + `payment_type` / `have_insurance` antes de reservar | ✅ Cerrada — verificada en Telegram real 2026-08-31/09-01; bug de prefetch en el estado `sched_patient_cond` encontrado y corregido |
+| F3-D2 | Backlog: traducir `visit_reason` al idioma del paciente; permitir cambiar de ciudad en el picker de doctores | 🅿️ `parked` en `.ai/state.yaml` — sin bloqueo externo, despriorizada |
+| F3-E | Reservar de verdad vía `POST /api/service/add-appointment` (no exige PIN, confirmado) | ✅ Cerrada 2026-09-03 — primera reserva real verificada en producción (`appointment_ref` real de Mongo, visible en `admin.pangi.com`). Hallazgo externo de timezone (config de una clínica del lado de Pangi), reportado al contacto técnico backend de Pangi, no bloquea |
 
 **Ya no hay dependencias del contacto técnico backend de Pangi para lo cerrado.** `/api/service/*` está en
-producción (`health` → 200 con la service key), pero el body de
-`add-appointment` no aparece en el Swagger (`OBLIGATORIOS: []`, sin
-propiedades) — hay que pedírselo antes de F3-E.
+producción y la `X-Pangi-Service-Key` fue recibida y verificada (`curl` →
+200 contra producción, 2026-09-03). El contrato del body de
+`add-appointment` — que no aparecía en el Swagger (`OBLIGATORIOS: []`, sin
+propiedades) — lo entregó el contacto técnico backend de Pangi y quedó
+implementado y verificado en F3-E.
+
+> **Fases relacionadas trackeadas en `.ai/state.yaml`** (fuente de verdad
+> de estado, más al día que este doc): `F3D2` (backlog de traducción /
+> cambio de ciudad, `parked`), `F3E-ID` (mapeo de identidad
+> Telegram→Pangi, `parked`), `UX-BTN` (botones interactivos en Telegram,
+> petición del CEO de Pangi, `parked`). F6 (Widget) vive en este doc pero
+> aún no en `state.yaml`.
 
 ### Aprendizajes de F3-C (importan para cualquier trabajo futuro con horarios)
 - `date-slots-range?doctor_id=&date=&clinic_address=&limit=&days=` devuelve
@@ -203,13 +213,13 @@ propiedades) — hay que pedírselo antes de F3-E.
 | # | Tarea | Quién | Estado |
 |---|---|---|---|
 | **B1** | Corregir exposición de datos en `/api/common/doctors` | el contacto técnico backend de Pangi | ✅ **17 ago** |
-| **B2** | Credencial de servicio (API key + Azure Key Vault) — 3–5 d | el contacto técnico backend de Pangi | 🔴 Bloquea F4, F5 |
+| **B2** | Credencial de servicio (API key + Azure Key Vault) — 3–5 d | el contacto técnico backend de Pangi | 🟡 Parcial — `X-Pangi-Service-Key` entregada y verificada (3 sep), habilitó F3-E. Azure Key Vault sigue pendiente. Aún bloquea F4, F5 |
 | **B3** | `GET /api/assistant/patient-summary` — 1–2 d | el contacto técnico backend de Pangi | 🔴 Bloquea F4.1 |
-| **B4** | Decisión + ruta de servicio para reservar (resuelve R1) — 2–3 d | el contacto técnico backend de Pangi + el CEO de Pangi | 🔴 Bloquea F3.6 |
+| **B4** | Decisión + ruta de servicio para reservar (resuelve R1) — 2–3 d | el contacto técnico backend de Pangi + el CEO de Pangi | 🟡 Resultado práctico logrado vía F3-E (reserva sin PIN, verificada en producción 3 sep); falta la decisión formal conjunta por escrito |
 | **B5** | 4 eventos webhook + teléfono plaintext + idioma — 2–3 d | el contacto técnico backend de Pangi | 🟡 Baja prioridad (F8) |
 | **B6** | Provisionar VM + PostgreSQL | **El encargado de infraestructura Azure del lado Pangi** | 🟡 **19 ago** |
 | **B7** | Confirmar semántica de `booked` | el contacto técnico backend de Pangi | ✅ **18 ago** |
-| **B8** | Payload de `add-appointment` y forma de `post-treatment-with-estimate` | el contacto técnico backend de Pangi | 🔴 Bloquea F5.1 |
+| **B8** | Payload de `add-appointment` y forma de `post-treatment-with-estimate` | el contacto técnico backend de Pangi | 🟡 Parcial — payload de `add-appointment` entregado y verificado en F3-E (3 sep); la forma de `post-treatment-with-estimate` sigue pendiente y aún bloquea F5.1 |
 | **B9** | ¿Cómo se rutea un `post_treatment` a los proveedores? ¿Por `category`, `addresses`, `procedures`? | el contacto técnico backend de Pangi | 🔴 Resuelve R9 |
 
 **Prioridad sugerida para el contacto técnico backend de Pangi:** B2 (desbloquea más) → B4 → B8 y B9 (responder) → B3 → B5
@@ -233,10 +243,15 @@ propiedades) — hay que pedírselo antes de F3-E.
 | F4.6 | Guías fotográficas de Pangi | Enlazar los PDFs `doc_es`/`doc_en`/`doc_pt` por especialidad que Pangi ya tiene |
 | F4.7 | Respetar `allow_number_of_procedure` | Dental 3 · plástica 3. Leer del catálogo sincronizado, no hardcodear. |
 
-## F3.6 · NOVA reserva de verdad
-**Depende de B4**
+## F3.6 · NOVA reserva de verdad — ✅ CUMPLIDA por F3-E (2026-09-03)
+**Dependía de B4**
 
 Ejecutar la reserva según la decisión de R1, y persistir la cita — hoy la referencia `PA-XXXXXX` es aleatoria y se pierde al expirar la sesión.
+
+**Estado:** el mismo resultado lo entregó F3-E (Pista A): reserva real vía
+`POST /api/service/add-appointment`, `appointment_ref` real de Mongo
+persistido y verificado en `admin.pangi.com`. F3.6 y F3-E son el mismo
+trabajo — no queda nada pendiente aquí salvo la decisión formal de B4/R1.
 
 ## F5 · ATLAS con estimates reales
 **Depende de B2 + B8 + que existan estimates**
@@ -369,7 +384,7 @@ POST /api/patient/add-appointment              (bloqueado por PIN)
 
 | # | Tema | Decide | Estado |
 |---|---|---|---|
-| D1 | PIN por SMS en la reserva | el CEO de Pangi + el contacto técnico backend de Pangi | 🔴 Abierto |
+| D1 | PIN por SMS en la reserva | el CEO de Pangi + el contacto técnico backend de Pangi | 🟡 Sin decisión formal, pero F3-E ya reserva sin PIN por la ruta de servicio (verificado en producción 2026-09-03) |
 | D2 | `completeness_score`: `* 85` vs `* 100` para el demo | Erick + el CEO de Pangi | 🔴 Abierto |
 | D3 | Precedencia perfil Pangi vs. sesión | Erick + el contacto técnico backend de Pangi | 🔴 Abierto |
 | D4 | Queries parametrizadas antes de producción/HIPAA | Erick | 🔴 Abierto |
