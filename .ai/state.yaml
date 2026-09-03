@@ -49,8 +49,8 @@ phases:
   - id: "F3E"
     title: "Reserva real vía POST /api/service/add-appointment"
     file: "docs/roadmap-integracion-pangi.md"
-    status: blocked
-    note: "Depende de el contacto técnico backend de Pangi: reenvío de X-Pangi-Service-Key. Gap interno de date/time ya resuelto (791817e)."
+    status: in_review
+    note: "Key recibida y verificada (curl → 200 contra producción). Implementación completa vía Claude Code con mocks, pendiente de revisión de diff por Erick/Claude-web y primera prueba real en Telegram antes de cerrar."
   - id: "F3E-ID"
     title: "Mapeo de identidad Telegram→Pangi (users.pangi_user_id → patient_id real)"
     file: "docs/roadmap-integracion-pangi.md"
@@ -58,4 +58,4 @@ phases:
     note: "Distinto de F3D2 y de gap-3. F3-E lo evita con Opción A (sched_test_patient_id, paciente de prueba). users.pangi_user_id ya existe (migración 004) pero está vacío y sin op en 05_db_manager. Se retoma para reservas con pacientes reales / widget."
 
 current_phase: "F3E"
-current_block: "x-pangi-service-key-pendiente"
+current_block: "revision-diff-y-prueba-telegram-f3e"

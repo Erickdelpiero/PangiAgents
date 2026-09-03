@@ -111,3 +111,35 @@ complejidad añadida sin necesidad real, dado que la key se espera pronto.
 
 **Estado:** cerrada. Diseño listo para implementación inmediata apenas
 se resuelva el bloqueante externo (X-Pangi-Service-Key).
+
+### [2026-09-03] X-Pangi-Service-Key recibida, F3-E implementada pendiente de prueba real
+
+**Contexto:** el contacto técnico backend de Pangi reenvió
+X-Pangi-Service-Key (credencial "Pangi Service Key", HTTP Header Auth, ya
+cargada en n8n). Se verificó con curl → 200 contra producción. Con el
+bloqueante externo resuelto, se procedió con la implementación completa
+que había quedado diferida en la entrada anterior: nodo de preparación
+del payload (`📦 ¿Reservar Cita?`), nodo HTTP (`🌐 API — Reservar Cita`),
+wiring, y manejo de las 3 ramas de respuesta (200/422/genérico) en el
+motor.
+
+**Decisión:**
+1. La implementación se hizo completa en `workflows/01_nova.json`, tal
+   como diseñado — sin llamar la API real: los 5 escenarios de respuesta
+   HTTP (200 con `data._id`, 422 con horarios frescos, 422 sin horarios
+   frescos, 401, timeout/sin respuesta) se probaron con mocks del nodo
+   HTTP, más una batería de equivalencia sobre 18 escenarios que no
+   tocan booking. Queda pendiente de revisión de diff (Erick/Claude-web)
+   y de una primera prueba real contra Telegram antes de cerrar la fase.
+2. **Hallazgo de diseño corregido:** el diseño original pedía validar en
+   `📦 ¿Reservar Cita?` la presencia de `nova.sched_test_patient_id`
+   antes de armar el payload. Ese campo nunca se puebla en el estado de
+   sesión — la Opción A (paciente de prueba) lo fija como literal
+   directamente en el nodo, no lo lee de `nova`. Validarlo tal cual
+   habría hecho que `needBooking` fuera `false` siempre, bloqueando toda
+   reserva de forma permanente. Se quitó ese campo de la lista de
+   validación; el resto de la validación (fecha/hora/doctor/clínica
+   seleccionados) y el literal `TEST_PATIENT_ID` quedan sin cambios.
+
+**Estado:** in_review. Pendiente de aprobación del diff por Erick y de
+la primera prueba real en Telegram.
