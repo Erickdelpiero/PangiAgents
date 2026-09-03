@@ -2,9 +2,9 @@
 
 **Proyecto:** NOVA · SAGE · ATLAS → plataforma Pangi
 **Responsable IA:** Erick Del Piero Gonzales
-**Contraparte técnica:** el contacto técnico backend de Pangi "el contacto técnico backend de Pangi" (Full Stack, Pangi)
-**Infraestructura Azure:** el encargado de infraestructura Azure del lado Pangi (@infra-azure-pangi) — provisiona VMs, no es especialista en infra
-**Decisor:** el CEO de Pangi (CEO)
+**Contraparte técnica:** el contacto técnico backend de Pangi
+**Infraestructura Azure:** el encargado de infraestructura Azure del lado Pangi — provisiona VMs, no es especialista en infra
+**Decisor:** el CEO de Pangi
 **Inicio:** lunes 17 de agosto de 2026
 **Última actualización:** martes 18 de agosto de 2026
 **Punto de retorno:** tag `mvp-v2-pre-pangi` en `pangi-dev`
@@ -13,7 +13,7 @@
 
 ## 0. Estado de partida
 
-**Lo que ya funciona:** sistema conversacional de tres agentes sobre n8n + Claude, multilenguaje (es/en/pt), handoffs sin pérdida de contexto, KB clínica de 22 procedimientos, PHI de-identificado antes de cada llamada al LLM, demostrado a el CEO de Pangi sin fallas.
+**Lo que ya funciona:** sistema conversacional de tres agentes sobre n8n + Claude, multilenguaje (es/en/pt), handoffs sin pérdida de contexto, KB clínica de 22 procedimientos, PHI de-identificado antes de cada llamada al LLM, demostrado al CEO de Pangi sin fallas.
 
 **Lo que está simulado:** todo lo que toca a Pangi. SAGE "publica" cambiando un flag en su propio PostgreSQL. NOVA genera una referencia de cita aleatoria en memoria que no persiste en ningún lado. ATLAS lee una tabla que nadie llena.
 
@@ -25,7 +25,7 @@
 - Migración `004` — identidad para widget, mapeo dental 12/12, ciudades 3/10
 - Migración `005` — mapeo cirugía plástica 10/10. **Los 22 procedimientos resuelven contra Pangi.**
 - Catálogo de cirugía plástica poblado en el Admin: de 5 a 15 procedimientos, en tres idiomas, `allow_number_of_procedure` 1 → 3
-- el contacto técnico backend de Pangi cerró R2 y R7 · el encargado de infraestructura Azure del lado Pangi provisiona la VM el 19 de agosto
+- El contacto técnico backend de Pangi cerró R2 y R7 · el encargado de infraestructura Azure del lado Pangi provisiona la VM el 19 de agosto
 - Tags: `f1-catalog-mapping`, `f1-catalog-complete`
 
 ---
@@ -52,13 +52,13 @@ La credencial solo bloquea tres cosas: reservar la cita, leer el perfil del paci
 
 | Decisión | Resolución |
 |---|---|
-| Alcance de especialidades | Solo **dental** y **cirugía plástica**. Lo que falte de un lado se agrega del otro. Las otras 20 especialidades son responsabilidad de el CEO de Pangi y no frenan la integración. |
+| Alcance de especialidades | Solo **dental** y **cirugía plástica**. Lo que falte de un lado se agrega del otro. Las otras 20 especialidades son responsabilidad del CEO de Pangi y no frenan la integración. |
 | Persistencia | **Opción A**: PostgreSQL guarda el borrador; al confirmar, UNA llamada crea el `post_treatment` en Pangi y se guarda el `_id` de vuelta. |
 | Campo clínico | `medical_description` (ya existe). **No se pide `clinical_intake`** — evita tocar el esquema core de Pangi. Se evalúa en fase 2. |
-| Hosting | Una VM en el Azure de Pangi (n8n + LiteLLM) + PostgreSQL gestionado. Si a el encargado de infraestructura Azure del lado Pangi le resulta más simple, Postgres puede ir en la VM y se migra después. |
+| Hosting | Una VM en el Azure de Pangi (n8n + LiteLLM) + PostgreSQL gestionado. Si al encargado de infraestructura Azure del lado Pangi le resulta más simple, Postgres puede ir en la VM y se migra después. |
 | Dimensionamiento | **8 GB ahora**, sube a **16 GB antes de producción** para autohospedar Langfuse. Redimensionar en Azure es un reinicio, no una migración. |
 | Observabilidad | **Langfuse Cloud (gratis) es temporal.** Ver R8 — tiene condición de salida obligatoria. |
-| Sincronización de catálogo | **Enfoque dual.** Ahora: schedule cada hora. Post-Azure: webhook + schedule diario como reconciliación. el contacto técnico backend de Pangi validó el diseño; hoy no se puede suscribir porque su `WebhookService` entrega a una sola URL de WordPress. |
+| Sincronización de catálogo | **Enfoque dual.** Ahora: schedule cada hora. Post-Azure: webhook + schedule diario como reconciliación. El contacto técnico backend de Pangi validó el diseño; hoy no se puede suscribir porque su `WebhookService` entrega a una sola URL de WordPress. |
 | Widget | Standalone vía script tag. Tokens: `#1B1D4B`, `#8AC43F`, Open Sans. |
 | Catálogos | Pangi es la fuente de verdad. Cero listas duplicadas. |
 | WhatsApp | **No es prioridad.** Solo notificaciones salientes, sin agentes conversacionales, y después del widget. Evolution API queda descartada: se usará la Cloud API oficial de Meta. |
@@ -75,7 +75,7 @@ La credencial solo bloquea tres cosas: reservar la cita, leer el perfil del paci
 | R3 | Catálogo de cirugía plástica reconstructivo, no estético | ✅ **Cerrado 18 ago** | 10 procedimientos estéticos cargados en el Admin, en tres idiomas. |
 | R4 | Solo 3 de 13 ciudades tienen médicos activos | 🟡 Aceptado | Nos acomodamos a las ciudades que existen. Se llenará cuando Pangi opere. |
 | R5 | Sin estimates reales, ATLAS no es demostrable | 🔴 Abierto — medio | Crear estimates de prueba con un médico de confianza |
-| R6 | Dependencia de disponibilidad de el contacto técnico backend de Pangi | 🟢 Bajo | Todo lo público va primero. el encargado de infraestructura Azure del lado Pangi absorbió la infra, sacándola del camino de el contacto técnico backend de Pangi. |
+| R6 | Dependencia de disponibilidad del contacto técnico backend de Pangi | 🟢 Bajo | Todo lo público va primero. El encargado de infraestructura Azure del lado Pangi absorbió la infra, sacándola del camino del contacto técnico backend de Pangi. |
 | R7 | Endpoint público exponía hashes, OTP y correos | ✅ **Cerrado 17 ago** | el contacto técnico backend de Pangi lo corrigió la misma noche. Era código heredado. |
 | R8 | **Contexto clínico saliendo a Langfuse Cloud** (procedimiento, condiciones, medicamentos, edad, sexo) sin BAA | 🟡 Aceptado temporalmente | El PHI Strip remueve identificadores directos, así que no hay PHI bajo Safe Harbor. **Condición de salida: no se habilita a pacientes reales sin Langfuse autohospedado.** |
 | R9 | ¿Cómo rutea Pangi una solicitud a los proveedores? | 🔴 Abierto — medio | Si es por el array `procedures`, los 4 dentales mapeados a la lista granular podrían no alcanzar a ningún médico. Pregunta B9. |
@@ -124,24 +124,66 @@ permite una sesión no expirada por usuario, una sesión vencida sin
 marcar seguía bloqueando la creación de una nueva. `07_maintenance` le
 da un llamador.
 
-## F3 · NOVA contra la API real — 🔴 SIGUIENTE
-**Sin dependencias de el contacto técnico backend de Pangi: los cinco endpoints son públicos**
+## F3 · NOVA contra la API real — 🟡 EN PROGRESO
+**F3-A, F3-B, F3-C cerrados · F3-D en diseño · F3-E bloqueada por el contacto técnico backend de Pangi**
 
-| # | Tarea | Detalle |
+| # | Tarea | Estado |
 |---|---|---|
-| F3.1 | Reemplazar `mockQueryDoctors` | Llamada real. Filtrar ciudad en memoria desde `all_clinic_address[].city` (la API filtra por país, no por ciudad). |
-| F3.2 | Nuevo paso: selección de clínica | `date-slots` exige `clinic_address`. La cadena real es doctor → clínica → fecha → slots. **Agrega un paso a la conversación: requiere decisión de producto.** |
-| F3.3 | Reemplazar `mockGetSlots` | `booked === true` significa **disponible** (confirmado por el contacto técnico backend de Pangi). Una llamada por día. Fecha en `MM/DD/YYYY`. |
-| F3.4 | Zonas horarias reales | Usar el `time_zone` que devuelve la API. Convertir a la zona del paciente. |
-| F3.5 | Modalidad desde datos reales | `appointment[].code` → `in_person` / `online` |
+| F3-A | Sincronizar doctores/clínicas/procedimientos a `pangi_doctors`, `pangi_clinics`, `pangi_doctor_procedures` vía `06_pangi_catalog_sync` | ✅ `f3a-doctors-sync` |
+| F3-B | NOVA lee doctores reales (nombres, títulos, clínicas, modalidad). Estrellas solo si `review_count > 0`; se muestra `years_experience` | ✅ `f3b-nova-doctors` |
+| F3-C | NOVA lee horarios reales vía `date-slots-range` (endpoint que el contacto técnico backend de Pangi construyó a pedido, no estaba en el plan original) | ✅ `f3c-real-slots` |
+| F3-D | Preguntar `visit_reason`, `payment_type`, `have_insurance` antes de reservar | 🟡 Diseño de capas listo, falta contrato del backend |
+| F3-E | Reservar de verdad vía `POST /api/service/add-appointment` (no exige PIN, confirmado) | 🔴 Bloqueada — Swagger no documenta el cuerpo |
 
-**Nota:** F3.4 cumple, con datos reales y sin trabajo extra, la gestión
-de zonas horarias que la propuesta original vendió a el CEO de Pangi como
-diferenciador de NOVA.
+**Ya no hay dependencias del contacto técnico backend de Pangi para lo cerrado.** `/api/service/*` está en
+producción (`health` → 200 con la service key), pero el body de
+`add-appointment` no aparece en el Swagger (`OBLIGATORIOS: []`, sin
+propiedades) — hay que pedírselo antes de F3-E.
 
-**Costura visible hoy:** NOVA dice "Encontré 3 especialistas en *Bogota*"
-—nombre del catálogo real— pero las fichas dicen "📍 Bogotá, Colombia",
-que sale de los 18 doctores mock. F3.1 la elimina.
+### Aprendizajes de F3-C (importan para cualquier trabajo futuro con horarios)
+- `date-slots-range?doctor_id=&date=&clinic_address=&limit=&days=` devuelve
+  los N horarios más cercanos en una sola llamada, ya sin horas pasadas,
+  en la zona del médico. Reemplazó el diseño original de 6 llamadas
+  paralelas por día.
+- `clinic_address` SIEMPRE explícito — sin él el servidor devuelve
+  `time_zone: "-330"` (default de India).
+- El margen de anticipación (12h presencial / 3h video) es política propia,
+  no de Pangi. Se aplica eligiendo **desde cuándo se pide** la disponibilidad,
+  no filtrando después: pedir desde hoy devolvía solo horarios que el
+  filtro iba a descartar, y un médico con el día libre entero parecía sin
+  disponibilidad — castigaba al que más agenda tenía.
+- `limit=10`: el endpoint devuelve los N más cercanos, no N repartidos por día.
+- Zona horaria mencionada UNA vez en el encabezado; horarios siempre en
+  hora local del médico (así los guarda Pangi).
+- `sched_slots` reconoce "otro especialista" y vuelve al picker mostrando
+  las fichas — antes el paciente quedaba atrapado entre elegir horario o
+  cancelar toda la conversación.
+
+### Mejoras futuras (no bloqueantes)
+- **C2**: si `date-slots-range` no encuentra nada en 7 días, ofrecer que
+  el paciente proponga una fecha concreta. Poco frecuente en la práctica
+  (verificado: Natalia mostró disponibilidad recién el día 4).
+- **F3-D capa 3**: motivo de visita por texto libre con NLU, si el
+  paciente rechaza los 7 procedimientos más comunes del médico.
+
+### Diseño de F3-D — motivo de visita, en 3 capas
+1. **Propuesta desde SAGE**: si el procedimiento que el paciente cotizó
+   con SAGE está entre los que ofrece el médico elegido, se propone
+   directamente ("Motivo: Ortodoncia — ¿correcto?").
+2. **Los 7 más comunes del médico**: algunos dentistas tienen hasta 48
+   procedimientos (códigos de facturación granulares). Verificado con
+   datos reales: hay un salto natural de frecuencia entre médicos —
+   Teeth Whitening (15), Orthodontics (14), Dental Implants (14), Veneers
+   (13), Crowns and Bridges (13), Full Mouth Reconstruction (13), Root
+   Canal Therapy (13), y luego cae a 9. Esos 7 coinciden con los
+   comerciales del catálogo de Pangi. Es un `ORDER BY` sobre
+   `pangi_doctor_procedures`, no una lista a mano.
+3. **Abierta / "ninguno de estos"** — diferida como mejora futura.
+
+### Pendiente de verificar antes de F3-D
+- Si `GET /api/service/patient-summary` incluye el seguro del paciente
+  (evitaría preguntarlo si ya está registrado). `have_insurance` se
+  pregunta siempre si no.
 
 ## F6 · Widget
 **31 ago – 11 sep · Sin dependencias técnicas · PRIORIDAD sobre WhatsApp**
@@ -156,7 +198,7 @@ que sale de los 18 doctores mock. F3.1 la elimina.
 
 ---
 
-# PISTA B — el contacto técnico backend de Pangi (Pangi) y el encargado de infraestructura Azure del lado Pangi (infra)
+# PISTA B — el contacto técnico backend de Pangi y el encargado de infraestructura Azure del lado Pangi (infra)
 
 | # | Tarea | Quién | Estado |
 |---|---|---|---|
@@ -165,7 +207,7 @@ que sale de los 18 doctores mock. F3.1 la elimina.
 | **B3** | `GET /api/assistant/patient-summary` — 1–2 d | el contacto técnico backend de Pangi | 🔴 Bloquea F4.1 |
 | **B4** | Decisión + ruta de servicio para reservar (resuelve R1) — 2–3 d | el contacto técnico backend de Pangi + el CEO de Pangi | 🔴 Bloquea F3.6 |
 | **B5** | 4 eventos webhook + teléfono plaintext + idioma — 2–3 d | el contacto técnico backend de Pangi | 🟡 Baja prioridad (F8) |
-| **B6** | Provisionar VM + PostgreSQL | **el encargado de infraestructura Azure del lado Pangi** | 🟡 **19 ago** |
+| **B6** | Provisionar VM + PostgreSQL | **El encargado de infraestructura Azure del lado Pangi** | 🟡 **19 ago** |
 | **B7** | Confirmar semántica de `booked` | el contacto técnico backend de Pangi | ✅ **18 ago** |
 | **B8** | Payload de `add-appointment` y forma de `post-treatment-with-estimate` | el contacto técnico backend de Pangi | 🔴 Bloquea F5.1 |
 | **B9** | ¿Cómo se rutea un `post_treatment` a los proveedores? ¿Por `category`, `addresses`, `procedures`? | el contacto técnico backend de Pangi | 🔴 Resuelve R9 |
@@ -237,9 +279,9 @@ Workflow `Pangi Webhook → validar HMAC → transformar → WhatsApp Cloud API`
 | **14–18 sep** | F5 ATLAS · QA | soporte |
 | **21–25 sep** | Widget en staging · QA integral | soporte |
 
-**Demo integrado a el CEO de Pangi: última semana de septiembre.**
+**Demo integrado al CEO de Pangi: última semana de septiembre.**
 
-Márgenes deliberadamente holgados: las estimaciones de el contacto técnico backend de Pangi dependen de prioridad de sprint, y F4 no puede empezar sin B2.
+Márgenes deliberadamente holgados: las estimaciones del contacto técnico backend de Pangi dependen de prioridad de sprint, y F4 no puede empezar sin B2.
 
 ---
 
@@ -311,7 +353,7 @@ POST /api/patient/add-appointment              (bloqueado por PIN)
 
 ## Correcciones a lo que el contacto técnico backend de Pangi indicó
 
-| el contacto técnico backend de Pangi dijo | Realidad |
+| El contacto técnico backend de Pangi dijo | Realidad |
 |---|---|
 | Tratamientos por `_id` de Mongo | Son **strings** dentro de `sub_speciality`. Sin `_id`. |
 | `POST /api/patient/get-doctor-availability` | `GET /api/common/date-slots` |
@@ -333,7 +375,7 @@ POST /api/patient/add-appointment              (bloqueado por PIN)
 | D4 | Queries parametrizadas antes de producción/HIPAA | Erick | 🔴 Abierto |
 | D5 | `clinical_intake` en fase 2 | el CEO de Pangi + el contacto técnico backend de Pangi | 🟡 Diferido |
 | D6 | Cloud API de Meta — costo y número | el CEO de Pangi | 🟡 Diferido |
-| D7 | BAA de Microsoft en la suscripción de Azure | el CEO de Pangi | 🔴 Preguntado a el encargado de infraestructura Azure del lado Pangi |
+| D7 | BAA de Microsoft en la suscripción de Azure | el CEO de Pangi | 🔴 Preguntado al encargado de infraestructura Azure del lado Pangi |
 | D8 | Arquitectura híbrida n8n + LangGraph | Erick | 🟡 Post-demo |
 
 ---
@@ -357,4 +399,4 @@ POST /api/patient/add-appointment              (bloqueado por PIN)
 
 ---
 
-*Documento vivo. Actualizar conforme lleguen respuestas de el contacto técnico backend de Pangi y avance la ejecución.*
+*Documento vivo. Actualizar conforme lleguen respuestas del contacto técnico backend de Pangi y avance la ejecución.*

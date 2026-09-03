@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# pre-commit — secret scanning obligatorio antes de cada commit.
+#
+# Instalación (una vez por repo):
+#   git config core.hooksPath .githooks
+#   chmod +x .githooks/pre-commit
+#
+# Requiere gitleaks. Si no está instalado, el commit se BLOQUEA con
+# instrucciones — no se permite continuar sin escaneo (nunca uses
+# `git commit --no-verify` como salida fácil; si el hook da falso positivo,
+# ajusta .gitleaks.toml, no lo saltes).
+
+set -euo pipefail
+
+if ! command -v gitleaks &> /dev/null; then
+  echo "❌ gitleaks no está instalado. Este proyecto requiere secret scanning"
+  echo "   antes de cada commit."
+  echo ""
+  echo "   Instalar (Ubuntu/Debian, binario oficial):"
+  echo "   curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin"
+  echo ""
+  echo "   Verifica con: gitleaks version"
+  exit 1
+fi
+
+echo "🔍 Escaneando secretos con gitleaks..."
+
+if ! gitleaks protect --staged --verbose; then
+  echo ""
+  echo "❌ gitleaks encontró posibles secretos en los cambios staged."
+  echo "   Revisa el hallazgo arriba. Si es un falso positivo real, agrégalo"
+  echo "   a .gitleaks.toml (allowlist) con justificación — no ignores el hook."
+  exit 1
+fi
+
+# Guardrail adicional: nunca permitir que .env (sin .example) entre a Git,
+# incluso si gitleaks no lo marca como secreto por formato.
+if git diff --cached --name-only | grep -E '(^|/)\.env$'; then
+  echo "❌ Intentando commitear un archivo .env real (no .env.example)."
+  echo "   Esto está prohibido por AGENTS.md. Revierte con:"
+  echo "   git restore --staged <archivo>"
+  exit 1
+fi
+
+echo "✅ Sin hallazgos. Continuando con el commit."

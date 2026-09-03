@@ -1,0 +1,56 @@
+# status válidos:
+#   draft      — en construcción, todavía no revisado
+#   in_review  — propuesto, esperando revisión cruzada
+#   closed     — cerrado y vigente
+#   superseded — reemplazado por otra entrada (indicar cuál en `note`)
+#   blocked    — no se puede avanzar por una dependencia externa
+#                (obligatorio: `note` explica QUÉ lo bloquea y de quién depende)
+#   parked     — baja prioridad ahora, sin bloqueo externo, se retoma después
+
+project: "pangi-agents"
+last_updated: "2026-09-01"
+
+phases:
+  - id: "F1"
+    title: "Catálogo Pangi sincronizado a PostgreSQL"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: closed
+    note: ""
+  - id: "F2"
+    title: "NOVA/SAGE leen del catálogo real (no hardcoded)"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: closed
+    note: ""
+  - id: "F3A"
+    title: "Doctores/clínicas/procedimientos sincronizados"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: closed
+    note: ""
+  - id: "F3B"
+    title: "NOVA lee doctores reales"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: closed
+    note: ""
+  - id: "F3C"
+    title: "NOVA lee horarios reales (date-slots-range)"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: closed
+    note: ""
+  - id: "F3D1"
+    title: "visit_reason (3 capas) + payment_type/have_insurance"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: closed
+    note: "Verificado en Telegram real 2026-08-31/09-01; bug de prefetch en estado sched_patient_cond encontrado y corregido."
+  - id: "F3D2"
+    title: "Backlog: traducir visit_reason al idioma del paciente, permitir cambiar ciudad en picker de doctores"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: parked
+    note: ""
+  - id: "F3E"
+    title: "Reserva real vía POST /api/service/add-appointment"
+    file: "docs/roadmap-integracion-pangi.md"
+    status: blocked
+    note: "Depende de el contacto técnico backend de Pangi: reenvío de X-Pangi-Service-Key (pedida 2026-09-01, en espera). Gap interno identificado y en curso: persistir date/time crudos del slot elegido en NOVA (no bloqueado por el contacto técnico backend de Pangi, se resuelve en paralelo)."
+
+current_phase: "F3E"
+current_block: "gap-3-persistir-date-time-slot"
