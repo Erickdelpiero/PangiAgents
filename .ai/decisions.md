@@ -78,3 +78,36 @@ bajo pero no cero, mismo criterio que ya se aplicó a la key.
 
 **Estado:** cerrada. Reemplaza la entrada [2026-09-01] "Secreto histórico
 aceptado como riesgo residual", que queda superseded.
+
+### [2026-09-03] Diseño de F3-E cerrado — implementación diferida a la key
+
+**Contexto:** diseño completo de la reserva real vía
+POST /api/service/add-appointment revisado. De los 12 gaps identificados
+inicialmente, 6 se resolvieron por relectura del contrato ya confirmado
+(category, time_zone, phone, practice_id no son required — el backend
+documenta comportamiento de fallback sin ellos; el nombre del campo de
+referencia en la respuesta 200 es data._id, ya visible en el ejemplo del
+Swagger capturado antes; el enum de payment_type ya estaba confirmado
+dos veces). Quedaron 4 decisiones reales, resueltas así:
+
+**Decisión:**
+1. sched_test_patient_id se llena como literal en el nodo de preparación
+   del payload (ID de prueba ya documentado en .ai/project.md, no es PHI
+   ni secreto — dentro de las reglas del proyecto).
+2. is_for_patient y family_member se OMITEN del payload (no se hardcodea
+   true) — el backend define su propio default para estos campos
+   opcionales.
+3. En caso de 422 ("slot already booked"), NOVA vuelve a sched_slots con
+   la lista de horarios RE-CONSULTADA (no la lista vieja cacheada), para
+   no repetir el mismo conflicto con datos obsoletos.
+4. La implementación completa (nodo prep, nodo HTTP, wiring, manejo de
+   errores) queda diferida hasta que llegue X-Pangi-Service-Key — se
+   implementa y prueba todo en un solo bloque, sin un modo mock/live
+   intermedio que agregue superficie de confusión entre ambientes.
+
+**Alternativas consideradas:** mergear F3-E ahora detrás de un flag de
+modo mock, activable a live cuando llegue la key — descartado por
+complejidad añadida sin necesidad real, dado que la key se espera pronto.
+
+**Estado:** cerrada. Diseño listo para implementación inmediata apenas
+se resuelva el bloqueante externo (X-Pangi-Service-Key).
