@@ -38,3 +38,43 @@ que protegía ya no existe.
 force-push — descartado por el costo/fricción frente a un riesgo ya
 neutralizado en la práctica.
 **Estado:** cerrada
+
+### [2026-09-03] Purga de historial de git — reemplaza decisión anterior
+
+**Contexto:** la entrada del 2026-09-01 ("Secreto histórico aceptado como
+riesgo residual") aceptó no reescribir el historial de un API key
+revocada. Al preparar `agent-harness`, la misma auditoría de higiene de
+repo detectó nombres de colaboradores reales (contacto técnico backend,
+encargado de infraestructura Azure, CEO de Pangi) expuestos en
+`docs/roadmap-integracion-pangi.md` y en metadatos de commits/tags — no
+solo en el working tree, sino en 25 commits de historial, en un repo
+público.
+
+**Decisión:** purgar el historial completo con `git filter-repo`
+(`--replace-text` + `--replace-message`, ya que los mensajes de commit y
+de un tag anotado también contenían nombres) y force-push de todas las
+ramas y tags. Se aprovechó la misma operación para purgar también la API
+key de Evolution API de la decisión anterior, ya que reescribir el
+historial una sola vez es más limpio que hacerlo dos veces.
+
+**Alternativas consideradas:** mantener la decisión original (aceptar
+riesgo residual) — descartada porque el caso ya no es equivalente al de
+la API key. Una credencial revocada (verificada con 401 contra el
+servidor real) es un riesgo neutralizado en la práctica; la identidad de
+personas activas hoy, en un repo público, no lo es — no hay un
+equivalente a "probar que ya no sirve" para un nombre propio.
+
+**Verificación:** `gitleaks detect` sobre los 25 commits (`no leaks
+found`) y `grep` de los 3 nombres + la key vieja sobre `git log --all -p`
+más mensajes de commits/tags — limpio, confirmado dos veces: primero
+sobre el mirror purgado local, y de nuevo sobre un clon fresco desde
+GitHub tras el push (para no depender de una copia local que pudiera
+estar desincronizada del remoto real).
+
+**Nota de exposición residual:** forks o clones de terceros hechos antes
+del push, y la caché interna de GitHub de los SHA viejos, pueden
+conservar el contenido purgado hasta que GitHub los recolecte — riesgo
+bajo pero no cero, mismo criterio que ya se aplicó a la key.
+
+**Estado:** cerrada. Reemplaza la entrada [2026-09-01] "Secreto histórico
+aceptado como riesgo residual", que queda superseded.
