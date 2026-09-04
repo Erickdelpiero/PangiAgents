@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pangi Widget — demo local</title>
+  <!-- Open Sans opcional; el widget cae a system-ui si no carga -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    body {
+      font-family: "Open Sans", system-ui, sans-serif;
+      max-width: 640px;
+      margin: 60px auto;
+      padding: 0 20px;
+      color: #1b1d4b;
+      line-height: 1.6;
+    }
+    code { background: #f1f2f6; padding: 2px 5px; border-radius: 4px; }
+    .note { background: #f4f5f8; border-left: 3px solid #8ac43f; padding: 12px 16px; }
+  </style>
+</head>
+<body>
+  <h1>Pangi Widget — página de prueba</h1>
+  <p>
+    Esta página existe solo para probar <code>pangi-widget.js</code> en local
+    contra el webhook de <code>00_orchestrator_web</code>. No se despliega.
+  </p>
+  <div class="note">
+    Ajusta <code>data-endpoint</code> abajo a la URL real del Webhook de n8n
+    (<code>.../webhook/pangi-widget</code>, o <code>.../webhook-test/pangi-widget</code>
+    mientras el workflow está en modo "Execute workflow").
+  </div>
+  <p>El launcher aparece abajo a la derecha.</p>
+
+  <script
+    src="./pangi-widget.js"
+    data-endpoint="http://localhost:5678/webhook/pangi-widget"
+    data-title="Pangi"
+    defer
+  ></script>
+</body>
+</html>
