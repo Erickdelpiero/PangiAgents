@@ -53,6 +53,11 @@ llamada real a la API de Pangi requiere su aprobación explícita.
   contra Swagger (`pangi.com/api/docs-json`) o la DB real — nunca se asume
   por memoria de conversaciones anteriores con el contacto técnico backend
   de Pangi.
+- Cualquier nombre real de una persona nueva que aparezca en la
+  conversación de trabajo (fuera del equipo de agentes NOVA/SAGE/ATLAS) se
+  agrega INMEDIATAMENTE a `.ai/anonymize-list.txt`, sección `[REDACT]`, sin
+  esperar a que Erick lo pida. El pre-commit hook lo hace cumplir
+  automáticamente — no depender de revisión manual.
 
 ## Contrapartes externas
 

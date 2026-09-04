@@ -42,4 +42,100 @@ if git diff --cached --name-only | grep -E '(^|/)\.env$'; then
   exit 1
 fi
 
+# ── Anonimización: nombres reales que nunca deben commitearse ──
+# Lee .ai/anonymize-list.txt (secciones [REDACT] / [ALLOW]) y escanea las
+# líneas AÑADIDAS del diff staged. Un término [REDACT] bloquea el commit
+# salvo que un término [ALLOW] presente en la misma línea lo excuse (un
+# nombre completo listado en [ALLOW] cubre su primer nombre suelto en esa
+# línea). La lista está gitignored y se amplía cada vez que un nombre real
+# nuevo aparece en la conversación de trabajo.
+ANON_LIST=".ai/anonymize-list.txt"
+if [[ -f "$ANON_LIST" ]]; then
+  echo "🔍 Escaneando nombres reales (.ai/anonymize-list.txt)..."
+  if ! python3 - "$ANON_LIST" <<'PYEOF'
+import re, subprocess, sys
+
+list_path = sys.argv[1]
+
+redact, allow, section = [], [], None
+with open(list_path, encoding="utf-8") as fh:
+    for raw in fh:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        low = line.lower()
+        if low == "[redact]":
+            section = "redact"; continue
+        if low == "[allow]":
+            section = "allow"; continue
+        if section == "redact":
+            redact.append(line)
+        elif section == "allow":
+            allow.append(line)
+
+if not redact:
+    sys.exit(0)
+
+# Límite de palabra sin tratar '_' como carácter de palabra (a diferencia
+# de \b): un handle corto se detecta también cuando lleva sufijo con '_'.
+BOUND = lambda t: re.compile(r"(?<![A-Za-z0-9])" + re.escape(t) + r"(?![A-Za-z0-9])", re.I)
+redact_res = [(t, BOUND(t)) for t in redact]
+allow_res  = [re.compile(re.escape(a), re.I) for a in allow]
+
+diff = subprocess.run(
+    ["git", "diff", "--cached", "--unified=0", "--no-color"],
+    capture_output=True, text=True, check=True,
+).stdout
+
+violations = []
+cur_file, new_lineno = None, 0
+for line in diff.splitlines():
+    if line.startswith("+++ "):
+        p = line[4:].strip()
+        if p == "/dev/null":
+            cur_file = None
+        elif p.startswith(("a/", "b/")):
+            cur_file = p[2:]
+        else:
+            cur_file = p
+        continue
+    if line.startswith("@@"):
+        m = re.search(r"\+(\d+)", line)
+        new_lineno = int(m.group(1)) if m else 0
+        continue
+    if line.startswith("+") and not line.startswith("+++"):
+        content = line[1:]
+        scrubbed = content
+        for ar in allow_res:
+            scrubbed = ar.sub(" ", scrubbed)
+        for term, rr in redact_res:
+            if rr.search(scrubbed):
+                violations.append((term, cur_file or "(archivo desconocido)",
+                                   new_lineno, content.strip()))
+        new_lineno += 1
+        continue
+    if line.startswith("-") and not line.startswith("---"):
+        continue
+    if line.startswith(" "):
+        new_lineno += 1
+
+if violations:
+    print()
+    for term, f, ln, text in violations:
+        print(f"❌ Nombre real detectado: '{term}' en {f} línea {ln}.")
+        print(f"   > {text}")
+    print()
+    print("   Anonimiza antes de comitear, o agrega la excepción exacta a")
+    print("   [ALLOW] en .ai/anonymize-list.txt si es un falso positivo.")
+    sys.exit(1)
+
+sys.exit(0)
+PYEOF
+  then
+    exit 1
+  fi
+else
+  echo "⚠️  $ANON_LIST no existe — se omite el escaneo de nombres reales."
+fi
+
 echo "✅ Sin hallazgos. Continuando con el commit."

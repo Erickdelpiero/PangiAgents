@@ -2,3 +2,4 @@
 .env*
 credentials*.json
 docs/framework-feedback.md
+.ai/anonymize-list.txt
